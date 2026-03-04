@@ -101,7 +101,7 @@ class AppDatabase {
   ''');
 
     // 🔥 SEED DATA ngay sau khi tạo bảng
-    await seedData();
+    await seedData(db);
   }
 
   // ================= CHANGE PASSWORD =================
@@ -132,8 +132,8 @@ class AppDatabase {
   }
 
   // ================= SEED DATA =================
-  Future<void> seedData() async {
-    final db = await database;
+  Future<void> seedData(Database db) async {
+
 
     // Kiểm tra nếu đã có user rồi thì không seed nữa
     final existing = await db.query('users');
