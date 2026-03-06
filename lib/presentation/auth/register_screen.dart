@@ -180,7 +180,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 32),
-            _buildLabel('Họ và tên'),
+            _buildRequiredLabel('Họ và tên'), // Dùng hàm mới có dấu *
             _buildTextField(
               controller: _nameController,
               hint: 'Nguyễn Văn A',
@@ -192,6 +192,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               },
             ),
             const SizedBox(height: 16),
+            _buildRequiredLabel('Ngày sinh'), // Thêm label Ngày sinh
             _buildBirthDateSection(),
             if (_dobError != null)
               Padding(
@@ -199,7 +200,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   child: Text(_dobError!,
                       style: const TextStyle(color: Colors.red, fontSize: 12))),
             const SizedBox(height: 16),
-            _buildLabel('Email'),
+            _buildRequiredLabel('Email'),
             _buildTextField(
               controller: _emailController,
               hint: 'example@gmail.com',
@@ -211,7 +212,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               },
             ),
             const SizedBox(height: 16),
-            _buildLabel('Mật khẩu'),
+            _buildRequiredLabel('Mật khẩu'),
             _buildPasswordField(
               controller: _passwordController,
               hint: 'Chữ hoa, thường, số, >=6 ký tự',
@@ -230,7 +231,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               },
             ),
             const SizedBox(height: 16),
-            _buildLabel('Xác nhận mật khẩu'),
+            _buildRequiredLabel('Xác nhận mật khẩu'),
             _buildPasswordField(
               controller: _confirmPasswordController,
               hint: 'Nhập lại mật khẩu',
@@ -257,11 +258,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _buildLabel(String text) => Padding(
+  // Hàm tạo Label mới tích hợp dấu * đỏ cho các trường bắt buộc
+  Widget _buildRequiredLabel(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(text,
-            style:
-                GoogleFonts.lexend(fontSize: 16, fontWeight: FontWeight.bold)),
+        child: RichText(
+          text: TextSpan(
+            text: text,
+            style: GoogleFonts.lexend(
+              fontSize: 16, 
+              fontWeight: FontWeight.bold,
+              color: AppColors.dark,
+            ),
+            children: const [
+              TextSpan(
+                text: ' *',
+                style: TextStyle(color: Colors.red),
+              ),
+            ],
+          ),
+        ),
       );
 
   Widget _buildTextField({

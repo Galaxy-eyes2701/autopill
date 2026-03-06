@@ -7,6 +7,9 @@ import 'package:autopill/presentation/inventory/inventory_screen.dart';
 import 'package:autopill/presentation/settings/settings_screen.dart';
 import 'package:autopill/presentation/inventory/add_medicine_screen.dart'; // Màn hình thêm thuốc
 
+// Import màn hình thêm liều thuốc (Đường dẫn có thể thay đổi tùy cấu trúc thư mục của bạn)
+import 'package:autopill/presentation/inventory/setup_dose_screen.dart';
+
 // 2. Import cái Footer bác tự custom
 import 'package:autopill/presentation/shared/widgets/custom_bottom_nav.dart';
 
@@ -39,20 +42,27 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       // Giữ trạng thái các trang khi chuyển tab (để không bị load lại)
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _screens,
-      ),
+      body: IndexedStack(index: _selectedIndex, children: _screens),
 
       // Nút FAB (Dấu cộng) ở giữa
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          // Điều hướng sang màn hình Thêm Thuốc thật
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-                builder: (context) => const AddMedicineStockScreen()),
-          );
+          // Kích hoạt logic điều hướng theo tab
+          if (_selectedIndex == 2) {
+            // Nếu đang ở màn Tủ thuốc (index 2) -> Điều hướng đến màn Create Medicine
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const AddMedicineStockScreen(),
+              ),
+            );
+          } else {
+            // Đang ở giao diện bình thường khác -> Điều hướng đến màn Thêm Liều Thuốc
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SetupDoseScreen()),
+            );
+          }
         },
         backgroundColor: const Color(0xFF137FEC), // Màu xanh chủ đạo
         shape: const CircleBorder(),
