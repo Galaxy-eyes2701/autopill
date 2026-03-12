@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class StopMedicineDialog {
-  static void show(BuildContext context) {
-    showDialog(
+  static Future<bool?> show(BuildContext context, {String? medicineName}) {
+    return showDialog<bool>(
       context: context,
-      barrierDismissible: false, // Bác phải chọn một trong hai nút mới tắt được
+      barrierDismissible: false,
       builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         elevation: 24,
@@ -39,7 +39,9 @@ class StopMedicineDialog {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Text(
-                "Bạn có chắc chắn muốn dừng loại thuốc này không? Thuốc sẽ được chuyển vào mục lịch sử.",
+                medicineName != null
+                    ? 'Bạn có chắc chắn muốn dừng thuốc "$medicineName" không? Thuốc sẽ được chuyển vào mục lịch sử.'
+                    : "Bạn có chắc chắn muốn dừng loại thuốc này không? Thuốc sẽ được chuyển vào mục lịch sử.",
                 textAlign: TextAlign.center,
                 style: GoogleFonts.lexend(
                   color: const Color(0xFF617589),
@@ -55,8 +57,7 @@ class StopMedicineDialog {
               height: 64,
               child: TextButton(
                 onPressed: () {
-                  // Logic xử lý khi xác nhận dừng thuốc ở đây
-                  Navigator.pop(context);
+                  Navigator.pop(context, true);
                 },
                 child: Text(
                   "Có, tôi chắc chắn",
@@ -74,7 +75,7 @@ class StopMedicineDialog {
               width: double.infinity,
               height: 64,
               child: TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () => Navigator.pop(context, false),
                 child: Text(
                   "Hủy bỏ",
                   style: GoogleFonts.lexend(

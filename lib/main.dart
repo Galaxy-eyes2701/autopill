@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:autopill/di.dart';
 import 'package:autopill/viewmodels/login/login_viewmodel.dart';
+import 'package:autopill/viewmodels/medicine/medicine_viewmodel.dart';
 import 'package:autopill/presentation/auth/login_screen.dart';
 import 'package:autopill/main_screen.dart';
 
@@ -17,11 +18,13 @@ void main() async {
   final bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
 
   final loginViewModel = buildLogin();
+  final medicineViewModel = buildMedicine();
 
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider<LoginViewModel>.value(value: loginViewModel),
+        ChangeNotifierProvider<MedicineViewmodel>.value(value: medicineViewModel),
       ],
       child: MyApp(isLoggedIn: isLoggedIn),
     ),

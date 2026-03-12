@@ -10,8 +10,10 @@ class Medicine {
   final String? formType;
   final int stockCurrent;
   final int stockThreshold;
-  final String status; // 'active' | 'stopped'
+  final String status;
   final String? instructions;
+  final String? createdAt;
+  final String? updatedAt;
 
   const Medicine({
     this.id,
@@ -24,9 +26,11 @@ class Medicine {
     this.dosageUnit,
     this.formType,
     this.stockCurrent = 0,
-    this.stockThreshold = 0,
+    this.stockThreshold = 5,
     this.status = 'active',
     this.instructions,
+    this.createdAt,
+    this.updatedAt,
   });
 
   bool get isLowStock => stockCurrent <= stockThreshold;
@@ -45,6 +49,8 @@ class Medicine {
     int? stockThreshold,
     String? status,
     String? instructions,
+    String? createdAt,
+    String? updatedAt,
   }) {
     return Medicine(
       id: id ?? this.id,
@@ -60,6 +66,8 @@ class Medicine {
       stockThreshold: stockThreshold ?? this.stockThreshold,
       status: status ?? this.status,
       instructions: instructions ?? this.instructions,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 }
