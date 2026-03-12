@@ -7,14 +7,15 @@ import 'package:autopill/viewmodels/login/login_viewmodel.dart';
 import 'package:autopill/presentation/auth/login_screen.dart';
 import 'package:autopill/main_screen.dart';
 
+// Import để dùng routeObserver từ DashboardScreen
+import 'package:autopill/presentation/dashboard/dashboard_screen.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Kiem tra phien dang nhap cu
   final prefs = await SharedPreferences.getInstance();
   final bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
 
-  // Khoi tao LoginViewModel qua DI
   final loginViewModel = buildLogin();
 
   runApp(
@@ -37,6 +38,7 @@ class MyApp extends StatelessWidget {
       title: 'AutoPill',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue),
+      navigatorObservers: [dashboardRouteObserver],
       home: isLoggedIn ? const MainScreen() : const LoginScreen(),
     );
   }

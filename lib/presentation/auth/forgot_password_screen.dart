@@ -1,4 +1,4 @@
-import 'package:autopill/viewmodels/forgot_password_viewmodel.dart';
+import 'package:autopill/viewmodels/login/forgot_password_viewmodel.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
