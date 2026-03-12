@@ -13,7 +13,7 @@ class StopMedicineDialog {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 32),
-            // Icon cảnh báo màu đỏ
+            //// Icon cảnh báo màu đỏ
             Container(
               height: 72,
               width: 72,

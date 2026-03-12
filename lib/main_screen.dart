@@ -46,13 +46,23 @@ class _MainScreenState extends State<MainScreen> {
 
       // Nút FAB (Dấu cộng) ở giữa
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
+        onPressed: () async {
           // Điều hướng sang màn hình Thêm Thuốc thật
-          Navigator.push(
+          final result = await Navigator.push(
             context,
             MaterialPageRoute(
                 builder: (context) => const AddMedicineStockScreen()),
           );
+          
+          // Nếu thêm thuốc thành công, reload danh sách
+          if (result == true && mounted) {
+            // Chuyển về tab Inventory nếu chưa ở đó
+            if (_selectedIndex != 2) {
+              setState(() {
+                _selectedIndex = 2;
+              });
+            }
+          }
         },
         backgroundColor: const Color(0xFF137FEC), // Màu xanh chủ đạo
         shape: const CircleBorder(),

@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:autopill/viewmodels/medicine/medicine_viewmodel.dart';
+import 'package:autopill/data/dtos/medicines/medicine_request_dto.dart';
 
-// --- Giả định class AppColors đã có trong dự án AutoPill của bạn ---
 class AppColors {
   static const Color primary = Color(0xFF137FEC);
   static const Color backgroundLight = Color(0xFFF6F7F8);
 }
 
-// --- Custom Button dùng chung cho toàn app để tránh lỗi Analyzer ---
 class AutoPillButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;
@@ -45,18 +46,77 @@ class AddMedicineStockScreen extends StatefulWidget {
   const AddMedicineStockScreen({super.key});
 
   @override
-  State<AddMedicineStockScreen> createState() => _AddMedicineStockScreenState();
+  State<AddMedicineStockScreen> createState() =>
+      _AddMedicineStockScreenState();
 }
 
 class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
+
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _categoryController = TextEditingController();
+  final TextEditingController _stockCurrentController = TextEditingController();
+  final TextEditingController _dosageUnitController = TextEditingController();
+  final TextEditingController _stockThresholdController = TextEditingController();
+  final TextEditingController _dosageAmountController = TextEditingController();
+  final TextEditingController _instructionsController = TextEditingController();
+
   int _selectedIconIndex = 0;
 
   final List<Map<String, dynamic>> _medicineIcons = [
-    {"label": "Viên nang", "icon": Icons.medication},
-    {"label": "Viên tròn", "icon": Icons.circle},
-    {"label": "Viên sủi", "icon": Icons.emergency},
-    {"label": "Dạng tiêm", "icon": Icons.vaccines},
+    {"label": "Viên nang", "value": "viên nang", "icon": Icons.medication},
+    {"label": "Viên tròn", "value": "viên tròn", "icon": Icons.circle},
+    {"label": "Viên sủi", "value": "viên sủi", "icon": Icons.emergency},
+    {"label": "Dạng tiêm", "value": "dạng tiêm", "icon": Icons.vaccines},
   ];
+
+  Future<void> _saveMedicine() async {
+    // Validate input
+    if (_nameController.text.isEmpty ||
+        _categoryController.text.isEmpty ||
+        _stockCurrentController.text.isEmpty ||
+        _dosageUnitController.text.isEmpty ||
+        _stockThresholdController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Vui lòng điền đầy đủ thông tin")),
+      );
+      return;
+    }
+
+    final vm = context.read<MedicineViewmodel>();
+
+    // TODO: Get userId from SharedPreferences or Auth state
+    final userId = 1; // Temporary hardcoded value
+
+    final request = MedicineRequestDto(
+      userId: userId,
+      name: _nameController.text,
+      category: _categoryController.text,
+      dosageAmount: _dosageAmountController.text.isNotEmpty 
+          ? double.tryParse(_dosageAmountController.text) 
+          : null,
+      dosageUnit: _dosageUnitController.text,
+      formType: _medicineIcons[_selectedIconIndex]['value'],
+      stockCurrent: int.parse(_stockCurrentController.text),
+      stockThreshold: int.parse(_stockThresholdController.text),
+      status: 'active',
+      instructions: _instructionsController.text.isNotEmpty 
+          ? _instructionsController.text 
+          : null,
+    );
+
+    final result = await vm.createMedicine(request);
+
+    if (result && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Đã thêm thuốc vào kho!")),
+      );
+      Navigator.pop(context, true); // Trả về true để báo đã thêm thành công
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Thêm thuốc thất bại")),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -79,25 +139,64 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
       body: Stack(
         children: [
           SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildTextField("Tên thuốc", "Ví dụ: Lisinopril"),
+
                 _buildTextField(
-                    "Loại bệnh / Công dụng", "Ví dụ: Huyết áp, Tiểu đường"),
+                    "Tên thuốc",
+                    "Ví dụ: Lisinopril 10mg",
+                    controller: _nameController),
+
+                _buildTextField(
+                    "Loại bệnh / Công dụng",
+                    "Ví dụ: Huyết áp",
+                    controller: _categoryController),
 
                 const SizedBox(height: 20),
 
                 Row(
                   children: [
                     Expanded(
-                      child: _buildTextField("Số lượng nhập", "Ví dụ: 40",
-                          isNumber: true),
+                      child: _buildTextField(
+                        "Số lượng hiện tại",
+                        "Ví dụ: 40",
+                        controller: _stockCurrentController,
+                        isNumber: true,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: _buildTextField("Đơn vị", "Viên, Gói, Tuýp"),
+                      child: _buildTextField(
+                        "Đơn vị",
+                        "Viên",
+                        controller: _dosageUnitController,
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildTextField(
+                        "Cảnh báo khi còn",
+                        "Ví dụ: 10",
+                        controller: _stockThresholdController,
+                        isNumber: true,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildTextField(
+                        "Liều lượng",
+                        "Ví dụ: 10",
+                        controller: _dosageAmountController,
+                        isNumber: true,
+                      ),
                     ),
                   ],
                 ),
@@ -105,23 +204,27 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
                 const SizedBox(height: 20),
 
                 _buildTextField(
-                  "Cảnh báo khi sắp hết",
-                  "Ví dụ: 10 (Hệ thống sẽ báo đỏ)",
-                  isNumber: true,
+                  "Hướng dẫn sử dụng (tùy chọn)",
+                  "Ví dụ: Uống sau bữa ăn",
+                  controller: _instructionsController,
+                  maxLines: 3,
                 ),
 
                 const SizedBox(height: 20),
 
                 Text(
-                  "Biểu tượng hiển thị",
+                  "Dạng thuốc",
                   style: GoogleFonts.lexend(
                       fontSize: 16, fontWeight: FontWeight.bold),
                 ),
+
                 const SizedBox(height: 12),
+
                 GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
                     mainAxisSpacing: 10,
                     crossAxisSpacing: 10,
@@ -130,8 +233,10 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
                   itemCount: _medicineIcons.length,
                   itemBuilder: (context, index) {
                     bool isSelected = _selectedIconIndex == index;
+
                     return GestureDetector(
-                      onTap: () => setState(() => _selectedIconIndex = index),
+                      onTap: () =>
+                          setState(() => _selectedIconIndex = index),
                       child: Container(
                         decoration: BoxDecoration(
                           color: isSelected
@@ -150,8 +255,9 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
                           children: [
                             Icon(
                               _medicineIcons[index]['icon'],
-                              color:
-                                  isSelected ? AppColors.primary : Colors.grey,
+                              color: isSelected
+                                  ? AppColors.primary
+                                  : Colors.grey,
                             ),
                             const SizedBox(width: 8),
                             Text(
@@ -165,12 +271,12 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
                     );
                   },
                 ),
-                const SizedBox(height: 120), // Khoảng trống cho nút ở dưới
+
+                const SizedBox(height: 120),
               ],
             ),
           ),
 
-          // Nút Lưu thông tin (Đã sửa lỗi)
           Positioned(
             bottom: 0,
             left: 0,
@@ -180,12 +286,7 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
               color: Colors.white,
               child: AutoPillButton(
                 text: "LƯU VÀO KHO",
-                onPressed: () {
-                  // Logic lưu vào kho thuốc
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Đã thêm thuốc vào kho!")),
-                  );
-                },
+                onPressed: _saveMedicine,
               ),
             ),
           ),
@@ -194,7 +295,13 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
     );
   }
 
-  Widget _buildTextField(String label, String hint, {bool isNumber = false}) {
+  Widget _buildTextField(
+      String label,
+      String hint, {
+        bool isNumber = false,
+        int maxLines = 1,
+        required TextEditingController controller,
+      }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(
@@ -205,19 +312,23 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
                   fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           TextField(
-            keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+            controller: controller,
+            maxLines: maxLines,
+            keyboardType:
+            isNumber ? TextInputType.number : TextInputType.text,
             decoration: InputDecoration(
               hintText: hint,
               filled: true,
               fillColor: Colors.white,
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
+                borderSide:
+                BorderSide(color: Colors.grey.shade300),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: AppColors.primary, width: 2),
+                borderSide: const BorderSide(
+                    color: AppColors.primary, width: 2),
               ),
             ),
           ),

@@ -1,83 +1,175 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:autopill/viewmodels/medicine/medicine_viewmodel.dart';
+import 'package:autopill/data/dtos/medicines/medicine_response_dto.dart';
 
-class InventoryScreen extends StatelessWidget {
+class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
+
+  @override
+  State<InventoryScreen> createState() => _InventoryScreenState();
+}
+
+class _InventoryScreenState extends State<InventoryScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<MedicineViewmodel>().loadMedicines();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     const primaryColor = Color(0xFF137FEC);
+    final viewModel = context.watch<MedicineViewmodel>();
 
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          // 1. Header Tình trạng kho
-          _buildHeader(),
+    if (viewModel.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
-          // 2. Section: Cần chú ý ngay
-          _buildSectionTitle(
-            Icons.warning_amber_rounded,
-            "CẦN CHÚ Ý NGAY",
-            Colors.red,
-          ),
-          _buildActiveMedicineCard(
-            name: "Lisinopril 10mg",
-            type: "Huyết áp",
-            remaining: 12,
-            total: 40,
-            percent: 0.3,
-            imageUrl:
-                "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&q=80&w=400",
-            primaryColor: primaryColor,
-            isWarning: true,
-          ),
+    // Phân loại thuốc
+    final activeMedicines = viewModel.medicines
+        .where((m) => m.status == 'active')
+        .toList();
+    
+    final warningMedicines = activeMedicines
+        .where((m) => m.stockCurrent <= m.stockThreshold)
+        .toList();
+    
+    final stableMedicines = activeMedicines
+        .where((m) => m.stockCurrent > m.stockThreshold)
+        .toList();
+    
+    final archivedMedicines = viewModel.medicines
+        .where((m) => m.status == 'inactive' || m.status == 'archived')
+        .toList();
 
-          // 3. Section: Thuốc dư thừa
-          _buildSectionTitle(
-            Icons.archive_outlined,
-            "THUỐC DƯ THỪA / NGỪNG DÙNG",
-            Colors.orange,
-          ),
-          _buildArchivedCard(
-            name: "Augmentin 625mg",
-            date: "15/10/2023",
-            reason: "Đã hoàn thành liệu trình kháng sinh.",
-            remainingCount: 6,
-            primaryColor: primaryColor,
-          ),
-          _buildArchivedCard(
-            name: "Paracetamol 500mg",
-            date: "02/11/2023",
-            reason: "Hết triệu chứng sốt và đau đầu.",
-            remainingCount: 10,
-            primaryColor: primaryColor,
-          ),
+    return RefreshIndicator(
+      onRefresh: () => viewModel.loadMedicines(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          children: [
+            // 1. Header Tình trạng kho
+            _buildHeader(warningMedicines.length),
 
-          // 4. Section: Đang sử dụng ổn định
-          _buildSectionTitle(
-            Icons.check_circle_outline_rounded,
-            "ĐANG SỬ DỤNG ỔN ĐỊNH",
-            Colors.green,
-          ),
-          _buildActiveMedicineCard(
-            name: "Atorvastatin 20mg",
-            type: "Mỡ máu",
-            remaining: 85,
-            total: 90,
-            percent: 0.94,
-            imageUrl:
-                "https://images.unsplash.com/photo-1628771065518-0d82f0263ece?auto=format&fit=crop&q=80&w=400",
-            primaryColor: primaryColor,
-            isWarning: false,
-          ),
+            // 2. Section: Cần chú ý ngay
+            if (warningMedicines.isNotEmpty) ...[
+              _buildSectionTitle(
+                Icons.warning_amber_rounded,
+                "CẦN CHÚ Ý NGAY",
+                Colors.red,
+              ),
+              ...warningMedicines.map((medicine) => _buildActiveMedicineCard(
+                    medicine: medicine,
+                    primaryColor: primaryColor,
+                    isWarning: true,
+                    onDelete: () => _deleteMedicine(medicine.id),
+                  )),
+            ],
 
-          const SizedBox(height: 100),
-        ],
+            // 3. Section: Thuốc dư thừa
+            if (archivedMedicines.isNotEmpty) ...[
+              _buildSectionTitle(
+                Icons.archive_outlined,
+                "THUỐC DƯ THỪA / NGỪNG DÙNG",
+                Colors.orange,
+              ),
+              ...archivedMedicines.map((medicine) => _buildArchivedCard(
+                    medicine: medicine,
+                    primaryColor: primaryColor,
+                    onReactivate: () => _reactivateMedicine(medicine.id),
+                    onDelete: () => _deleteMedicine(medicine.id),
+                  )),
+            ],
+
+            // 4. Section: Đang sử dụng ổn định
+            if (stableMedicines.isNotEmpty) ...[
+              _buildSectionTitle(
+                Icons.check_circle_outline_rounded,
+                "ĐANG SỬ DỤNG ỔN ĐỊNH",
+                Colors.green,
+              ),
+              ...stableMedicines.map((medicine) => _buildActiveMedicineCard(
+                    medicine: medicine,
+                    primaryColor: primaryColor,
+                    isWarning: false,
+                    onDelete: () => _deleteMedicine(medicine.id),
+                  )),
+            ],
+
+            // Hiển thị khi không có thuốc
+            if (viewModel.medicines.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  children: [
+                    Icon(Icons.inventory_2_outlined,
+                        size: 80, color: Colors.grey[300]),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Chưa có thuốc trong kho',
+                      style: GoogleFonts.lexend(
+                        fontSize: 18,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            const SizedBox(height: 100),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Future<void> _deleteMedicine(int id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Xác nhận xóa', style: GoogleFonts.lexend()),
+        content: Text('Bạn có chắc muốn xóa thuốc này?',
+            style: GoogleFonts.lexend()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Hủy', style: GoogleFonts.lexend()),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Xóa',
+                style: GoogleFonts.lexend(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await context.read<MedicineViewmodel>().deleteMedicine(id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Đã xóa thuốc', style: GoogleFonts.lexend()),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _reactivateMedicine(int id) async {
+    // TODO: Implement reactivate medicine
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Chức năng đang phát triển', style: GoogleFonts.lexend()),
+      ),
+    );
+  }
+
+  Widget _buildHeader(int warningCount) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 24),
       child: Column(
@@ -100,7 +192,7 @@ class InventoryScreen extends StatelessWidget {
             ),
           ),
           Text(
-            'Bạn có 2 loại thuốc sắp hết',
+            'Bạn có $warningCount loại thuốc sắp hết',
             style: GoogleFonts.lexend(
               color: const Color(0xFF617589),
               fontSize: 16,
@@ -132,16 +224,35 @@ class InventoryScreen extends StatelessWidget {
   }
 
   Widget _buildActiveMedicineCard({
-    required String name,
-    required String type,
-    required int remaining,
-    required int total,
-    required double percent,
-    required String imageUrl,
+    required MedicineResponseDto medicine,
     required Color primaryColor,
     required bool isWarning,
+    required VoidCallback onDelete,
   }) {
+    final remaining = medicine.stockCurrent;
+    final total = medicine.stockCurrent + medicine.stockThreshold;
+    final percent = total > 0 ? remaining / total : 0.0;
     Color statusColor = isWarning ? Colors.red : Colors.green;
+    
+    // Lấy icon từ formType
+    IconData medicineIcon = Icons.medication;
+    if (medicine.formType != null) {
+      switch (medicine.formType!.toLowerCase()) {
+        case 'viên nang':
+          medicineIcon = Icons.medication;
+          break;
+        case 'viên tròn':
+          medicineIcon = Icons.circle;
+          break;
+        case 'viên sủi':
+          medicineIcon = Icons.emergency;
+          break;
+        case 'dạng tiêm':
+          medicineIcon = Icons.vaccines;
+          break;
+      }
+    }
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -160,10 +271,14 @@ class InventoryScreen extends StatelessWidget {
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(24),
               ),
-              image: DecorationImage(
-                image: NetworkImage(imageUrl),
-                fit: BoxFit.cover,
+              gradient: LinearGradient(
+                colors: [primaryColor.withOpacity(0.7), primaryColor],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
+            ),
+            child: Center(
+              child: Icon(medicineIcon, size: 80, color: Colors.white),
             ),
           ),
           Padding(
@@ -178,14 +293,14 @@ class InventoryScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          name,
+                          medicine.name,
                           style: GoogleFonts.lexend(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         Text(
-                          type,
+                          medicine.category ?? 'Không phân loại',
                           style: GoogleFonts.lexend(
                             color: Colors.grey,
                             fontSize: 16,
@@ -219,7 +334,7 @@ class InventoryScreen extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      "Còn lại: $remaining/$total viên",
+                      "Còn lại: $remaining/${remaining + medicine.stockThreshold} ${medicine.dosageUnit ?? 'viên'}",
                       style: GoogleFonts.lexend(fontWeight: FontWeight.bold),
                     ),
                     Text(
@@ -241,35 +356,79 @@ class InventoryScreen extends StatelessWidget {
                 ),
                 if (isWarning) ...[
                   const SizedBox(height: 20),
-                  // THAY THẾ ELEVATED BUTTON BẰNG CONTAINER
-                  GestureDetector(
-                    onTap: () {
-                      // Xử lý mua thêm
-                    },
-                    child: Container(
-                      height: 56,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: primaryColor,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: primaryColor.withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            // Xử lý mua thêm
+                          },
+                          child: Container(
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: primaryColor,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: primaryColor.withOpacity(0.3),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.shopping_cart,
+                                    color: Colors.white),
+                                const SizedBox(width: 8),
+                                Text(
+                                  "Mua thêm",
+                                  style: GoogleFonts.lexend(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: onDelete,
+                        child: Container(
+                          height: 56,
+                          width: 56,
+                          decoration: BoxDecoration(
+                            color: Colors.red[50],
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(Icons.delete, color: Colors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: onDelete,
+                    child: Container(
+                      height: 48,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.red, width: 2),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.shopping_cart, color: Colors.white),
+                          const Icon(Icons.delete, color: Colors.red, size: 20),
                           const SizedBox(width: 8),
                           Text(
-                            "Mua thêm ngay",
+                            "Xóa thuốc",
                             style: GoogleFonts.lexend(
-                              color: Colors.white,
-                              fontSize: 16,
+                              color: Colors.red,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -287,11 +446,10 @@ class InventoryScreen extends StatelessWidget {
   }
 
   Widget _buildArchivedCard({
-    required String name,
-    required String date,
-    required String reason,
-    required int remainingCount,
+    required MedicineResponseDto medicine,
     required Color primaryColor,
+    required VoidCallback onReactivate,
+    required VoidCallback onDelete,
   }) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -307,25 +465,27 @@ class InventoryScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: GoogleFonts.lexend(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      medicine.name,
+                      style: GoogleFonts.lexend(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  Text(
-                    "Ngừng dùng: $date",
-                    style: GoogleFonts.lexend(
-                      color: Colors.orange[800],
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                    Text(
+                      "Ngừng dùng: ${medicine.updatedAt ?? 'N/A'}",
+                      style: GoogleFonts.lexend(
+                        color: Colors.orange[800],
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               Container(
                 padding: const EdgeInsets.all(6),
@@ -334,7 +494,7 @@ class InventoryScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  "CÒN $remainingCount VIÊN",
+                  "CÒN ${medicine.stockCurrent} ${medicine.dosageUnit?.toUpperCase() ?? 'VIÊN'}",
                   style: const TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
@@ -345,29 +505,27 @@ class InventoryScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            "Lý do: $reason",
+            "Lý do: ${medicine.instructions ?? 'Không có ghi chú'}",
             style: GoogleFonts.lexend(color: Colors.grey[600], fontSize: 16),
           ),
           const SizedBox(height: 20),
           Row(
             children: [
-              // THAY THẾ OUTLINED BUTTON 1
               Expanded(
                 child: _buildCustomOutlineButton(
                   icon: Icons.history,
                   label: "Tái sử dụng",
                   color: primaryColor,
-                  onTap: () {},
+                  onTap: onReactivate,
                 ),
               ),
               const SizedBox(width: 12),
-              // THAY THẾ OUTLINED BUTTON 2
               Expanded(
                 child: _buildCustomOutlineButton(
                   icon: Icons.delete_forever,
                   label: "Tiêu hủy",
                   color: Colors.red,
-                  onTap: () {},
+                  onTap: onDelete,
                 ),
               ),
             ],

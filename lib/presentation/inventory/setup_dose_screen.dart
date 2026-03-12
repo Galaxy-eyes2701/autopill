@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// --- Giả định bạn đã có class này ở file chung ---
 class AppColors {
   static const Color primary = Color(0xFF137FEC);
   static const Color backgroundLight = Color(0xFFF6F7F8);
 }
 
-// --- Custom Button để tránh lỗi "ElevatedButton undefined" ---
 class AutoPillButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;
@@ -54,37 +52,65 @@ class SetupDoseScreen extends StatefulWidget {
 }
 
 class _SetupDoseScreenState extends State<SetupDoseScreen> {
-  TimeOfDay _selectedTime = const TimeOfDay(hour: 8, minute: 0);
-  final List<String> _days = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
-  final List<bool> _selectedDays = [true, true, true, true, true, true, true];
+  final TextEditingController _nameController = TextEditingController();
 
-  final List<Map<String, dynamic>> _inventoryMedicines = [
-    {
-      "name": "Paracetamol 500mg",
-      "desc": "Giảm đau",
-      "icon": Icons.medication,
-      "selected": false
-    },
-    {
-      "name": "Vitamin C",
-      "desc": "Tăng đề kháng",
-      "icon": Icons.emergency,
-      "selected": false
-    },
-    {
-      "name": "Amlodipine 5mg",
-      "desc": "Huyết áp",
-      "icon": Icons.favorite,
-      "selected": false
-    },
-  ];
+  TimeOfDay? _selectedTime;
+
+  final List<String> _days = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+  final List<bool> _selectedDays = List.generate(7, (_) => false);
+
+  List<String> _medicines = [];
+  final List<int> _selectedMedicines = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMedicines();
+  }
+
+  Future<void> _loadMedicines() async {
+    // TODO: sau này gọi ViewModel / Repository
+    setState(() {
+      _medicines = [];
+    });
+  }
 
   Future<void> _pickTime() async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
-      initialTime: _selectedTime,
+      initialTime: _selectedTime ?? const TimeOfDay(hour: 8, minute: 0),
     );
-    if (picked != null) setState(() => _selectedTime = picked);
+
+    if (picked != null) {
+      setState(() {
+        _selectedTime = picked;
+      });
+    }
+  }
+
+  void _saveDose() {
+    String name = _nameController.text;
+
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Vui lòng nhập tên liều")),
+      );
+      return;
+    }
+
+    if (_selectedTime == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Vui lòng chọn giờ")),
+      );
+      return;
+    }
+
+    print("Dose name: $name");
+    print("Time: ${_selectedTime!.format(context)}");
+    print("Days: $_selectedDays");
+    print("Medicines: $_selectedMedicines");
+
+    // TODO: gọi ViewModel để lưu
   }
 
   @override
@@ -112,15 +138,15 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
           children: [
             _buildSectionTitle("Tên liều thuốc"),
             _buildNameInput(),
+
             _buildSectionTitle("Đặt giờ nhắc"),
             _buildTimePickerCard(),
+
             _buildSectionTitle("Lặp lại vào"),
             _buildDayPicker(),
+
             _buildSectionTitle("Chọn thuốc từ kho"),
-            ...List.generate(
-              _inventoryMedicines.length,
-              (index) => _buildMedicineItem(index),
-            ),
+            _buildMedicineList(),
           ],
         ),
       ),
@@ -131,8 +157,13 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
-      child: Text(title,
-          style: GoogleFonts.lexend(fontSize: 18, fontWeight: FontWeight.bold)),
+      child: Text(
+        title,
+        style: GoogleFonts.lexend(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 
@@ -140,14 +171,16 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: TextField(
+        controller: _nameController,
         style: GoogleFonts.lexend(fontSize: 18),
         decoration: InputDecoration(
-          hintText: "Ví dụ: Sau ăn sáng...",
+          hintText: "Ví dụ: Sau ăn sáng",
           filled: true,
           fillColor: Colors.white,
           border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide.none),
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
         ),
       ),
     );
@@ -158,7 +191,9 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(20)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -168,19 +203,26 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
                   color: AppColors.primary, size: 28),
               const SizedBox(width: 12),
               Text(
-                _selectedTime.format(context),
+                _selectedTime == null
+                    ? "--:--"
+                    : _selectedTime!.format(context),
                 style: GoogleFonts.lexend(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary),
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                ),
               ),
             ],
           ),
           TextButton(
             onPressed: _pickTime,
-            child: Text("ĐỔI GIỜ",
-                style: GoogleFonts.lexend(
-                    fontWeight: FontWeight.bold, fontSize: 16)),
+            child: Text(
+              "ĐỔI GIỜ",
+              style: GoogleFonts.lexend(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
           ),
         ],
       ),
@@ -194,8 +236,13 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: List.generate(7, (index) {
           bool isSelected = _selectedDays[index];
+
           return GestureDetector(
-            onTap: () => setState(() => _selectedDays[index] = !isSelected),
+            onTap: () {
+              setState(() {
+                _selectedDays[index] = !isSelected;
+              });
+            },
             child: Container(
               width: 45,
               height: 45,
@@ -203,15 +250,17 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
                 color: isSelected ? AppColors.primary : Colors.white,
                 shape: BoxShape.circle,
                 border: Border.all(
-                    color:
-                        isSelected ? AppColors.primary : Colors.grey.shade300),
+                  color:
+                  isSelected ? AppColors.primary : Colors.grey.shade300,
+                ),
               ),
               child: Center(
                 child: Text(
                   _days[index],
                   style: GoogleFonts.lexend(
-                      color: isSelected ? Colors.white : Colors.black,
-                      fontWeight: FontWeight.bold),
+                    color: isSelected ? Colors.white : Colors.black,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ),
@@ -221,10 +270,35 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
     );
   }
 
+  Widget _buildMedicineList() {
+    if (_medicines.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(20),
+        child: Center(child: Text("Chưa có thuốc trong kho")),
+      );
+    }
+
+    return Column(
+      children: List.generate(
+        _medicines.length,
+            (index) => _buildMedicineItem(index),
+      ),
+    );
+  }
+
   Widget _buildMedicineItem(int index) {
+    bool isSelected = _selectedMedicines.contains(index);
+
     return GestureDetector(
-      onTap: () => setState(() => _inventoryMedicines[index]['selected'] =
-          !_inventoryMedicines[index]['selected']),
+      onTap: () {
+        setState(() {
+          if (isSelected) {
+            _selectedMedicines.remove(index);
+          } else {
+            _selectedMedicines.add(index);
+          }
+        });
+      },
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         padding: const EdgeInsets.all(16),
@@ -232,28 +306,35 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _inventoryMedicines[index]['selected']
-                ? AppColors.primary
-                : Colors.transparent,
+            color: isSelected ? AppColors.primary : Colors.transparent,
             width: 2,
           ),
         ),
         child: Row(
           children: [
             Checkbox(
-              value: _inventoryMedicines[index]['selected'],
+              value: isSelected,
               activeColor: AppColors.primary,
-              onChanged: (v) =>
-                  setState(() => _inventoryMedicines[index]['selected'] = v!),
+              onChanged: (v) {
+                setState(() {
+                  if (v!) {
+                    _selectedMedicines.add(index);
+                  } else {
+                    _selectedMedicines.remove(index);
+                  }
+                });
+              },
             ),
-            const SizedBox(width: 8),
-            Icon(_inventoryMedicines[index]['icon'], color: AppColors.primary),
+            const SizedBox(width: 12),
+            const Icon(Icons.medication, color: AppColors.primary),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                _inventoryMedicines[index]['name'],
+                _medicines[index],
                 style: GoogleFonts.lexend(
-                    fontSize: 18, fontWeight: FontWeight.w600),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -268,10 +349,7 @@ class _SetupDoseScreenState extends State<SetupDoseScreen> {
       color: Colors.white,
       child: AutoPillButton(
         text: "XÁC NHẬN THIẾT LẬP",
-        onPressed: () {
-          // Logic lưu liều uống
-          print("Lưu liều: ${_selectedTime.format(context)}");
-        },
+        onPressed: _saveDose,
       ),
     );
   }
