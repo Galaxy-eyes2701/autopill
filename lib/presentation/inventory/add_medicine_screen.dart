@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:autopill/viewmodels/medicine/medicine_viewmodel.dart';
+import 'package:autopill/viewmodels/login/login_viewmodel.dart';
 import 'package:autopill/data/dtos/medicines/medicine_request_dto.dart';
 
 // --- Giả định class AppColors đã có trong dự án AutoPill của bạn ---
@@ -90,10 +91,21 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen> {
       return;
     }
 
+    // Lấy userId từ LoginViewModel
+    final loginVm = context.read<LoginViewModel>();
+    final currentUser = loginVm.currentUser;
+    
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Vui lòng đăng nhập lại")),
+      );
+      return;
+    }
+
     final vm = context.read<MedicineViewmodel>();
 
     final request = MedicineRequestDto(
-      userId: 1, // TODO: Lấy từ auth service
+      userId: currentUser.id, // Lấy từ user đang đăng nhập
       name: _nameController.text,
       category: _categoryController.text,
       dosageUnit: _dosageUnitController.text,
