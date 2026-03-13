@@ -3,11 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:autopill/domain/entities/schedule.dart';
 import 'package:autopill/data/implementations/local/app_database.dart';
 
-/// Gọi hàm này từ DashboardScreen khi user tap vào card:
-///
-/// ```dart
-/// await showEditScheduleSheet(context, schedule: s, onUpdated: () => _init());
-/// ```
 Future<void> showEditScheduleSheet(
     BuildContext context, {
       required Schedule schedule,
@@ -52,7 +47,7 @@ class _EditScheduleSheet extends StatefulWidget {
 class _EditScheduleSheetState extends State<_EditScheduleSheet> {
   late TimeOfDay _selectedTime;
   late TextEditingController _labelCtrl;
-  late double _doseQty;
+  late int _doseQty;  // ── SỬA: int thay vì double
   bool _isSaving = false;
 
   static const _blue = Color(0xFF137FEC);
@@ -66,7 +61,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       minute: int.parse(parts[1]),
     );
     _labelCtrl = TextEditingController(text: widget.schedule.label ?? '');
-    _doseQty = widget.schedule.doseQuantity;
+    // ── SỬA: làm tròn lên để tương thích dữ liệu cũ nếu có
+    _doseQty = widget.schedule.doseQuantity.round().clamp(1, 999);
   }
 
   @override
@@ -79,20 +75,6 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}';
 
   bool get _isTaken => widget.intakeStatus == 'taken';
-
-  /// Bước tăng/giảm liều: dạng lỏng (ml) → 0.5, còn lại → 1 (số nguyên)
-  double get _doseStep {
-    switch (widget.formType) {
-      case 'siro':
-      case 'dung_dich':
-      case 'nuoc':
-        return 0.5;
-      default:
-        return 1.0;
-    }
-  }
-
-  double get _doseMin => _doseStep;
 
   Future<void> _pickTime() async {
     final picked = await showTimePicker(
@@ -116,7 +98,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       {
         'time': _timeString,
         'label': _labelCtrl.text.trim(),
-        'dose_quantity': _doseQty,
+        'dose_quantity': _doseQty,  // lưu int, SQLite chấp nhận
       },
       where: 'id = ?',
       whereArgs: [widget.schedule.id],
@@ -126,14 +108,16 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       widget.onUpdated();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Row(children: [
-          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+          const Icon(Icons.check_circle_rounded,
+              color: Colors.white, size: 18),
           const SizedBox(width: 8),
           Text('Đã cập nhật lịch uống!',
               style: GoogleFonts.lexend(color: Colors.white)),
         ]),
         backgroundColor: Colors.green.shade600,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         duration: const Duration(seconds: 2),
       ));
     }
@@ -149,7 +133,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       ]),
       backgroundColor: Colors.grey.shade700,
       behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape:
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       duration: const Duration(seconds: 2),
     ));
   }
@@ -158,18 +143,21 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Xoá lịch uống?',
             style: GoogleFonts.lexend(fontWeight: FontWeight.bold)),
         content: Text(
           'Lịch uống "${widget.medicineName}" lúc ${widget.schedule.time} sẽ bị xoá vĩnh viễn.',
-          style: GoogleFonts.lexend(fontSize: 14, color: Colors.grey.shade600),
+          style: GoogleFonts.lexend(
+              fontSize: 14, color: Colors.grey.shade600),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text('Huỷ',
-                style: GoogleFonts.lexend(color: Colors.grey.shade600)),
+                style:
+                GoogleFonts.lexend(color: Colors.grey.shade600)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -201,8 +189,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
           ]),
           backgroundColor: Colors.red.shade600,
           behavior: SnackBarBehavior.floating,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
           duration: const Duration(seconds: 2),
         ));
       }
@@ -252,9 +240,9 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                   ],
                 ),
               ),
-              // Nút xoá — disabled nếu đã uống hôm nay
               IconButton(
-                onPressed: _isTaken ? _showCannotDeleteSnack : _confirmDelete,
+                onPressed:
+                _isTaken ? _showCannotDeleteSnack : _confirmDelete,
                 icon: Icon(
                   Icons.delete_outline_rounded,
                   color: _isTaken ? Colors.grey.shade300 : Colors.red,
@@ -299,7 +287,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
           ],
 
           // ── Chọn giờ ──
-          _SectionLabel(icon: Icons.access_time_rounded, label: 'Giờ uống'),
+          _SectionLabel(
+              icon: Icons.access_time_rounded, label: 'Giờ uống'),
           const SizedBox(height: 10),
           GestureDetector(
             onTap: _isTaken ? null : _pickTime,
@@ -321,7 +310,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                 child: Row(
                   children: [
                     Icon(Icons.schedule_rounded,
-                        color: _isTaken ? Colors.grey.shade400 : _blue,
+                        color:
+                        _isTaken ? Colors.grey.shade400 : _blue,
                         size: 22),
                     const SizedBox(width: 12),
                     Text(
@@ -329,8 +319,9 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                       style: GoogleFonts.lexend(
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
-                          color:
-                          _isTaken ? Colors.grey.shade400 : _blue),
+                          color: _isTaken
+                              ? Colors.grey.shade400
+                              : _blue),
                     ),
                     const Spacer(),
                     if (!_isTaken)
@@ -377,15 +368,18 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                     : Colors.grey.shade50,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey.shade200),
+                  borderSide:
+                  BorderSide(color: Colors.grey.shade200),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey.shade200),
+                  borderSide:
+                  BorderSide(color: Colors.grey.shade200),
                 ),
                 disabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey.shade200),
+                  borderSide:
+                  BorderSide(color: Colors.grey.shade200),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -402,7 +396,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
           // ── Số liều ──
           _SectionLabel(
               icon: Icons.medication_rounded,
-              label: 'Liều lượng mỗi lần'),
+              label: 'Số lượng mỗi lần uống'),
           const SizedBox(height: 10),
           Opacity(
             opacity: _isTaken ? 0.45 : 1.0,
@@ -413,20 +407,17 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                   onTap: _isTaken
                       ? () {}
                       : () {
-                    if (_doseQty > _doseMin) {
-                      setState(() => _doseQty = double.parse(
-                          (_doseQty - _doseStep)
-                              .toStringAsFixed(1)));
+                    // ── SỬA: bước 1, min 1 ──
+                    if (_doseQty > 1) {
+                      setState(() => _doseQty -= 1);
                     }
                   },
-                  disabled: _isTaken || _doseQty <= _doseMin,
+                  disabled: _isTaken || _doseQty <= 1,
                 ),
                 Expanded(
                   child: Center(
                     child: Text(
-                      _doseQty % 1 == 0
-                          ? _doseQty.toInt().toString()
-                          : _doseQty.toString(),
+                      '$_doseQty',
                       style: GoogleFonts.lexend(
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
@@ -440,8 +431,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                   icon: Icons.add,
                   onTap: _isTaken
                       ? () {}
-                      : () => setState(() => _doseQty = double.parse(
-                      (_doseQty + _doseStep).toStringAsFixed(1))),
+                      : () => setState(() => _doseQty += 1),
                   disabled: _isTaken,
                 ),
               ],
@@ -449,7 +439,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
           ),
           const SizedBox(height: 32),
 
-          // ── Nút lưu ── (disabled khi đã uống hoặc đang lưu)
+          // ── Nút lưu ──
           SizedBox(
             width: double.infinity,
             height: 52,

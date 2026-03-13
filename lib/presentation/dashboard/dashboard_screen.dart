@@ -7,6 +7,7 @@ import 'package:autopill/data/implementations/local/app_database.dart';
 import 'package:autopill/domain/entities/schedule.dart';
 import 'package:autopill/di.dart';
 
+import '../../viewmodels/medicine/medicine_viewmodel.dart';
 import '../../viewmodels/schedule/schedule_viewmodel.dart';
 import 'edit_schedule_sheet.dart';
 import 'package:autopill/presentation/notification/notification_screen.dart';
@@ -41,6 +42,7 @@ class _DashboardBodyState extends State<_DashboardBody>
   final Map<int, String> _medicineNames = {};
   final Map<int, String> _medicineCategories = {};
   final Map<int, String> _medicineFormTypes = {};
+  final Map<int, String> _medicineUnits = {}; // ← dùng dosage_unit từ DB
   int _userId = 0;
 
   /// Ngày đang xem (mặc định hôm nay)
@@ -114,13 +116,13 @@ class _DashboardBodyState extends State<_DashboardBody>
     _medicineNames.clear();
     _medicineCategories.clear();
     _medicineFormTypes.clear();
+    _medicineUnits.clear();
 
     final sel = _selectedDate;
     final startOfDay =
         DateTime(sel.year, sel.month, sel.day).millisecondsSinceEpoch;
     final endOfDay = startOfDay + const Duration(days: 1).inMilliseconds;
 
-    // FIX: snapshot _isFuture tại thời điểm load để tránh race condition
     final isFutureSnapshot = _isFuture;
 
     for (final s in schedules) {
@@ -134,6 +136,9 @@ class _DashboardBodyState extends State<_DashboardBody>
             medRows.first['category'] as String? ?? '';
         _medicineFormTypes[s.id!] =
             medRows.first['form_type'] as String? ?? '';
+        // ← Lấy thẳng dosage_unit từ DB — luôn đúng vì AddMedicine tự fill
+        _medicineUnits[s.id!] =
+            medRows.first['dosage_unit'] as String? ?? 'viên';
       }
 
       final intakeRows = await db.query(
@@ -142,7 +147,6 @@ class _DashboardBodyState extends State<_DashboardBody>
         whereArgs: [s.id, startOfDay, endOfDay],
       );
 
-      // FIX: dùng snapshot thay vì getter để đảm bảo nhất quán
       _intakeStatus[s.id!] = intakeRows.isNotEmpty
           ? intakeRows.first['status'] as String
           : (isFutureSnapshot ? 'upcoming' : 'pending');
@@ -200,6 +204,16 @@ class _DashboardBodyState extends State<_DashboardBody>
       'UPDATE medicines SET stock_current = MAX(0, stock_current - ?) WHERE id = ?',
       [schedule.doseQuantity.toInt(), schedule.medicineId],
     );
+
+    // Patch stock vào MedicineViewmodel để InventoryScreen cập nhật realtime
+    final updated = await db.query('medicines',
+        columns: ['stock_current'],
+        where: 'id = ?',
+        whereArgs: [schedule.medicineId]);
+    if (updated.isNotEmpty && context.mounted) {
+      final newStock = updated.first['stock_current'] as int;
+      context.read<MedicineViewmodel>().patchStock(schedule.medicineId, newStock);
+    }
 
     setState(() => _intakeStatus[schedule.id!] = 'taken');
 
@@ -667,9 +681,11 @@ class _DashboardBodyState extends State<_DashboardBody>
         else
           ...sorted.asMap().entries.map((e) {
             final sid = e.value.id!;
-            final status = _intakeStatus[sid] ?? (_isFuture ? 'upcoming' : 'pending');
+            final status =
+                _intakeStatus[sid] ?? (_isFuture ? 'upcoming' : 'pending');
+            final canEdit =
+                (_isToday && status != 'taken') || _isFuture;
             return _TimelineItem(
-              // FIX: ValueKey bao gồm cả isFuture để rebuild đúng khi đổi ngày
               key: ValueKey('$sid-$status-$_isFuture'),
               schedule: e.value,
               isLast: e.key == sorted.length - 1,
@@ -678,10 +694,11 @@ class _DashboardBodyState extends State<_DashboardBody>
               _medicineNames[sid] ?? 'Thuốc #${e.value.medicineId}',
               medicineCategory: _medicineCategories[sid] ?? '',
               medicineFormType: _medicineFormTypes[sid] ?? '',
+              medicineUnit: _medicineUnits[sid] ?? 'viên', // ← dosage_unit
               isToday: _isToday,
               isFuture: _isFuture,
               onTaken: () => _markAsTaken(e.value),
-              onEdit: _isToday
+              onEdit: canEdit
                   ? () => showEditScheduleSheet(
                 context,
                 schedule: e.value,
@@ -719,29 +736,6 @@ class _DashboardBodyState extends State<_DashboardBody>
     );
   }
 
-  // ── Dose unit helper ──────────────────────────────────────────────────────
-  static String doseUnitFromFormType(String? formType) {
-    switch (formType) {
-      case 'vien_nang':
-      case 'vien_nen':
-      case 'vien_sui':
-        return 'viên';
-      case 'siro':
-      case 'dung_dich':
-      case 'nuoc':
-        return 'ml';
-      case 'tuyt':
-      case 'kem':
-        return 'tuýp';
-      case 'goi':
-        return 'gói';
-      case 'ong':
-        return 'ống';
-      default:
-        return 'lần';
-    }
-  }
-
   // ── Stat Row ───────────────────────────────────────────────────────────────
   Widget _buildStatRow() {
     final pending =
@@ -767,7 +761,7 @@ class _DashboardBodyState extends State<_DashboardBody>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Timeline Item — hỗ trợ 3 chế độ: today / future / past
+//  Timeline Item
 // ─────────────────────────────────────────────────────────────────────────────
 class _TimelineItem extends StatefulWidget {
   final Schedule schedule;
@@ -776,6 +770,7 @@ class _TimelineItem extends StatefulWidget {
   final String medicineName;
   final String medicineCategory;
   final String medicineFormType;
+  final String medicineUnit; // ← dosage_unit từ DB
   final bool isToday;
   final bool isFuture;
   final VoidCallback onTaken;
@@ -789,6 +784,7 @@ class _TimelineItem extends StatefulWidget {
     required this.medicineName,
     required this.medicineCategory,
     required this.medicineFormType,
+    required this.medicineUnit,
     required this.isToday,
     required this.isFuture,
     required this.onTaken,
@@ -808,7 +804,6 @@ class _TimelineItemState extends State<_TimelineItem>
     super.initState();
     _ctrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 300));
-    // Set ngay giá trị đúng khi khởi tạo
     if (widget.status == 'taken') _ctrl.value = 1.0;
   }
 
@@ -838,17 +833,12 @@ class _TimelineItemState extends State<_TimelineItem>
   }
 
   bool get _isTaken => widget.status == 'taken';
-
   bool get _isCurrent =>
       widget.isToday && !_isTaken && _diffMinutes >= -30 && _diffMinutes <= 60;
-
   bool get _isOverdue =>
       widget.isToday && !_isTaken && _diffMinutes > 60;
-
   bool get _isMissed =>
       !widget.isToday && !widget.isFuture && widget.status == 'pending';
-
-  // FIX: thêm check status == 'upcoming' để bắt đúng trạng thái tương lai
   bool get _isUpcoming =>
       widget.isFuture || widget.status == 'upcoming';
 
@@ -857,7 +847,7 @@ class _TimelineItemState extends State<_TimelineItem>
     if (_isCurrent) return const Color(0xFF137FEC);
     if (_isOverdue) return Colors.orange;
     if (_isMissed) return Colors.red.shade300;
-    if (_isUpcoming) return Colors.blue.shade200; // FIX: dùng _isUpcoming
+    if (_isUpcoming) return Colors.blue.shade200;
     return Colors.grey.shade400;
   }
 
@@ -870,7 +860,6 @@ class _TimelineItemState extends State<_TimelineItem>
           // ── Dot + line ──
           Column(
             children: [
-              // FIX: chỉ dùng ScaleTransition khi taken, còn lại hiện scale 1.0 bình thường
               ScaleTransition(
                 scale: _isTaken
                     ? CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut)
@@ -911,7 +900,7 @@ class _TimelineItemState extends State<_TimelineItem>
                 decoration: BoxDecoration(
                   color: _isMissed
                       ? Colors.red.shade50
-                      : _isUpcoming // FIX: dùng _isUpcoming
+                      : _isUpcoming
                       ? Colors.blue.shade50
                       : Colors.white,
                   borderRadius: BorderRadius.circular(20),
@@ -976,14 +965,14 @@ class _TimelineItemState extends State<_TimelineItem>
                         ],
                       ),
                       const SizedBox(height: 8),
-                      // Dose info
+                      // Dose info — dùng widget.medicineUnit thay vì map form_type
                       Row(
                         children: [
                           Icon(Icons.medication_rounded,
                               size: 15, color: Colors.grey.shade400),
                           const SizedBox(width: 6),
                           Text(
-                            '${widget.schedule.doseQuantity % 1 == 0 ? widget.schedule.doseQuantity.toInt() : widget.schedule.doseQuantity} ${_DashboardBodyState.doseUnitFromFormType(widget.medicineFormType)}',
+                            '${widget.schedule.doseQuantity % 1 == 0 ? widget.schedule.doseQuantity.toInt() : widget.schedule.doseQuantity} ${widget.medicineUnit}',
                             style: GoogleFonts.lexend(
                                 fontSize: 13, color: Colors.grey.shade500),
                           ),
@@ -1014,7 +1003,6 @@ class _TimelineItemState extends State<_TimelineItem>
   }
 
   Widget _buildAction() {
-    // ✅ Đã uống
     if (_isTaken) {
       return Padding(
         padding: const EdgeInsets.only(top: 10),
@@ -1031,7 +1019,6 @@ class _TimelineItemState extends State<_TimelineItem>
       );
     }
 
-    // 🔵 Đến giờ uống (hôm nay)
     if (_isCurrent) {
       return Padding(
         padding: const EdgeInsets.only(top: 12),
@@ -1059,7 +1046,6 @@ class _TimelineItemState extends State<_TimelineItem>
       );
     }
 
-    // 🟠 Quá giờ (hôm nay)
     if (_isOverdue) {
       return Padding(
         padding: const EdgeInsets.only(top: 10),
@@ -1100,7 +1086,6 @@ class _TimelineItemState extends State<_TimelineItem>
       );
     }
 
-    // 🔴 Bỏ lỡ (ngày trước)
     if (_isMissed) {
       return Padding(
         padding: const EdgeInsets.only(top: 10),
@@ -1117,7 +1102,6 @@ class _TimelineItemState extends State<_TimelineItem>
       );
     }
 
-    // 🔮 Tương lai — FIX: check _isUpcoming thay vì chỉ widget.isFuture
     if (_isUpcoming) {
       return Padding(
         padding: const EdgeInsets.only(top: 10),
@@ -1148,12 +1132,11 @@ class _TimelineItemState extends State<_TimelineItem>
     );
   }
 
-  // FIX: _iconForState dùng _isUpcoming để bắt đúng cả 2 trường hợp
   IconData _iconForState() {
     if (_isTaken) return Icons.check_rounded;
     if (_isOverdue) return Icons.warning_amber_rounded;
     if (_isMissed) return Icons.close_rounded;
-    if (_isUpcoming) return Icons.event_rounded; // FIX: dùng _isUpcoming
+    if (_isUpcoming) return Icons.event_rounded;
     return Icons.access_time_rounded;
   }
 

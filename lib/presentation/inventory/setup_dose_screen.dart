@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,6 +30,7 @@ class _SetupDoseBody extends StatefulWidget {
 
 class _SetupDoseBodyState extends State<_SetupDoseBody>
     with SingleTickerProviderStateMixin {
+  // ── Preset giờ ────────────────────────────────────────────────────────────
   static const _presets = [
     {'emoji': '🌅', 'label': 'Sáng', 'h': 7, 'm': 0},
     {'emoji': '☀️', 'label': 'Trưa', 'h': 12, 'm': 0},
@@ -37,11 +39,16 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
 
   TimeOfDay _selectedTime = const TimeOfDay(hour: 8, minute: 0);
   final _labelController = TextEditingController(text: 'Sau ăn sáng');
-  final List<bool> _selectedDays = List.filled(7, true);
-  final List<String> _dayLabels = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
-  final List<String> _dayValues = ['2', '3', '4', '5', '6', '7', 'CN'];
-  double _doseQuantity = 1.0;
-  final Map<int, double> _selectedMedicines = {};
+
+  // ── Chọn ngày theo lịch thực tế (7 ngày kể từ hôm nay) ───────────────────
+  final List<DateTime> _dateOptions = List.generate(14, (i) {
+    final t = DateTime.now();
+    return DateTime(t.year, t.month, t.day + i);
+  });
+  final Set<DateTime> _selectedDates = {};
+
+  // ── Thuốc đã chọn: id → số lượng ─────────────────────────────────────────
+  final Map<int, int> _selectedMedicines = {};
 
   List<Medicine> _medicines = [];
   bool _loadingMedicines = true;
@@ -49,9 +56,39 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
 
+  // ── Helpers tĩnh ──────────────────────────────────────────────────────────
+  static String doseUnitFromFormType(String? formType) {
+    switch (formType) {
+      case 'vien_nang':
+      case 'vien_nen':
+      case 'vien_sui':
+        return 'viên';
+      case 'long':
+      case 'siro':
+      case 'dung_dich':
+      case 'nuoc':
+        return 'ml';
+      case 'tuyt':
+      case 'kem':
+        return 'tuýp';
+      case 'goi':
+        return 'gói';
+      case 'tiem':
+      case 'ong':
+        return 'ống';
+      default:
+        return 'lần';
+    }
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
+
+    // Mặc định chọn hôm nay
+    _selectedDates.add(_dateOptions.first);
+
     _animController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _fadeAnim =
@@ -66,6 +103,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     super.dispose();
   }
 
+  // ── Load thuốc ────────────────────────────────────────────────────────────
   Future<void> _loadMedicines() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('userId') ?? 0;
@@ -101,15 +139,19 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     _animController.forward();
   }
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
   String get _timeString =>
       '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}';
 
-  List<String> get _activeDays => _dayValues
-      .asMap()
-      .entries
-      .where((e) => _selectedDays[e.key])
-      .map((e) => e.value)
-      .toList();
+  /// Chuyển Set<DateTime> sang List<String> dayValues ('2','3',...,'CN')
+  List<String> get _activeDays {
+    const dayMap = {1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: 'CN'};
+    return _selectedDates
+        .map((d) => dayMap[d.weekday] ?? '')
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .toList();
+  }
 
   Future<void> _pickTime() async {
     final picked =
@@ -117,34 +159,46 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     if (picked != null) setState(() => _selectedTime = picked);
   }
 
-  // ── Submit với kiểm tra trùng đầy đủ ───────────────────────────────────────
-
+  // ── Submit ────────────────────────────────────────────────────────────────
   Future<void> _submit() async {
+    // Validate cơ bản
     if (_selectedMedicines.isEmpty) {
       _showSnack('Vui lòng chọn ít nhất một thuốc', isError: true);
       return;
     }
-    if (_activeDays.isEmpty) {
+    if (_selectedDates.isEmpty) {
       _showSnack('Vui lòng chọn ít nhất một ngày', isError: true);
       return;
     }
 
-    final vm = context.read<ScheduleViewModel>();
-
-    // ── Bước 1: kiểm tra tồn kho ──────────────────────────────────────────────
+    // ── CHẶN: liều vượt tồn kho ──────────────────────────────────────────
     for (final entry in _selectedMedicines.entries) {
       final medicine = _medicines.firstWhere((m) => m.id == entry.key);
-      final dosePerTake = entry.value;
-      // Đếm số lần uống/ngày = số lịch active hiện tại + 1 (cái đang thêm)
+      if (entry.value > medicine.stockCurrent) {
+        _showSnack(
+          '"${medicine.name}": liều ${entry.value} '
+              '${doseUnitFromFormType(medicine.formType)} '
+              'vượt tồn kho (còn ${medicine.stockCurrent})',
+          isError: true,
+        );
+        return;
+      }
+    }
+
+    final vm = context.read<ScheduleViewModel>();
+
+    // ── Bước 1: kiểm tra tồn kho dài hạn ────────────────────────────────
+    for (final entry in _selectedMedicines.entries) {
+      final medicine = _medicines.firstWhere((m) => m.id == entry.key);
+      final dosePerTake = entry.value.toDouble();
+
       final existingSchedules = await vm.checkDuplicate(
         medicineId: entry.key,
         time: _timeString,
         doseQuantity: dosePerTake,
       );
-      // takesPerDay ≈ số lần uống sau khi thêm lịch này
-      final takesPerDay = existingSchedules.level == DuplicateLevel.sameDay
-          ? 2
-          : 1;
+      final takesPerDay =
+      existingSchedules.level == DuplicateLevel.sameDay ? 2 : 1;
 
       final stockResult = await vm.checkStock(
         medicineId: entry.key,
@@ -155,13 +209,11 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
       if (!mounted) return;
 
       if (stockResult.level == StockLevel.empty) {
-        // 🔴 CHẶN — hết thuốc
         await _showStockEmptyDialog(medicine.name);
         return;
       }
 
       if (stockResult.level == StockLevel.low) {
-        // 🟡 CẢNH BÁO — sắp hết, hỏi user
         final confirmed = await _showStockLowDialog(
           medicine.name,
           stockResult.stockCurrent,
@@ -173,14 +225,14 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
       }
     }
 
-    // ── Bước 2: kiểm tra trùng lịch ───────────────────────────────────────────
+    // ── Bước 2: kiểm tra trùng lịch ──────────────────────────────────────
     for (final entry in _selectedMedicines.entries) {
       final medicine = _medicines.firstWhere((m) => m.id == entry.key);
 
       final result = await vm.checkDuplicate(
         medicineId: entry.key,
         time: _timeString,
-        doseQuantity: entry.value,
+        doseQuantity: entry.value.toDouble(),
       );
 
       if (!mounted) return;
@@ -201,14 +253,14 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
       }
     }
 
-    // ── Bước 3: qua hết kiểm tra → lưu ───────────────────────────────────────
+    // ── Bước 3: lưu ──────────────────────────────────────────────────────
     bool allOk = true;
     for (final entry in _selectedMedicines.entries) {
       final ok = await vm.addSchedule(
         medicineId: entry.key,
         time: _timeString,
         label: _labelController.text.trim(),
-        doseQuantity: entry.value,
+        doseQuantity: entry.value.toDouble(),
         activeDays: _activeDays,
       );
       if (!ok) allOk = false;
@@ -223,15 +275,13 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     }
   }
 
-  // ── 🔴 Hết thuốc — chặn cứng ─────────────────────────────────────────────
-
+  // ── Dialogs ───────────────────────────────────────────────────────────────
   Future<void> _showStockEmptyDialog(String medicineName) {
     return showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -239,9 +289,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
-              ),
+                  color: Colors.red.shade50, shape: BoxShape.circle),
               child: const Icon(Icons.medication_liquid_outlined,
                   color: Colors.red, size: 44),
             ),
@@ -256,9 +304,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
               textAlign: TextAlign.center,
               text: TextSpan(
                 style: GoogleFonts.lexend(
-                    fontSize: 14,
-                    color: Colors.grey.shade700,
-                    height: 1.6),
+                    fontSize: 14, color: Colors.grey.shade700, height: 1.6),
                 children: [
                   TextSpan(
                       text: '"$medicineName"',
@@ -292,8 +338,6 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
-  // ── 🟡 Sắp hết thuốc — cảnh báo mềm ─────────────────────────────────────
-
   Future<bool> _showStockLowDialog(
       String medicineName, int stockCurrent, int daysCanCover,
       [String? formType]) async {
@@ -301,8 +345,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -310,24 +353,20 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                shape: BoxShape.circle,
-              ),
+                  color: Colors.orange.shade50, shape: BoxShape.circle),
               child: const Icon(Icons.inventory_2_outlined,
                   color: Colors.orange, size: 44),
             ),
             const SizedBox(height: 16),
             Text('Thuốc sắp hết!',
-                style: GoogleFonts.lexend(
-                    fontSize: 20, fontWeight: FontWeight.bold)),
+                style:
+                GoogleFonts.lexend(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             RichText(
               textAlign: TextAlign.center,
               text: TextSpan(
                 style: GoogleFonts.lexend(
-                    fontSize: 14,
-                    color: Colors.grey.shade700,
-                    height: 1.6),
+                    fontSize: 14, color: Colors.grey.shade700, height: 1.6),
                 children: [
                   TextSpan(
                       text: '"$medicineName"',
@@ -337,11 +376,10 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
               ),
             ),
             const SizedBox(height: 14),
-            // Badge tồn kho
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                  vertical: 14, horizontal: 16),
+              padding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
               decoration: BoxDecoration(
                 color: Colors.orange.shade50,
                 borderRadius: BorderRadius.circular(14),
@@ -355,8 +393,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                       children: [
                         Text('Tồn kho hiện tại',
                             style: GoogleFonts.lexend(
-                                fontSize: 12,
-                                color: Colors.orange.shade700)),
+                                fontSize: 12, color: Colors.orange.shade700)),
                         Text('$stockCurrent $unit',
                             style: GoogleFonts.lexend(
                                 fontSize: 20,
@@ -366,10 +403,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                     ),
                   ),
                   Container(
-                    width: 1,
-                    height: 36,
-                    color: Colors.orange.shade200,
-                  ),
+                      width: 1, height: 36, color: Colors.orange.shade200),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
@@ -377,12 +411,9 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                       children: [
                         Text('Đủ dùng khoảng',
                             style: GoogleFonts.lexend(
-                                fontSize: 12,
-                                color: Colors.orange.shade700)),
+                                fontSize: 12, color: Colors.orange.shade700)),
                         Text(
-                          daysCanCover > 0
-                              ? '$daysCanCover ngày'
-                              : '< 1 ngày',
+                          daysCanCover > 0 ? '$daysCanCover ngày' : '< 1 ngày',
                           style: GoogleFonts.lexend(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
@@ -433,8 +464,8 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                     elevation: 0,
                   ),
                   child: Text('Vẫn thiết lập',
-                      style: GoogleFonts.lexend(
-                          fontWeight: FontWeight.bold)),
+                      style:
+                      GoogleFonts.lexend(fontWeight: FontWeight.bold)),
                 ),
               ),
             ]),
@@ -445,15 +476,12 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     return confirmed ?? false;
   }
 
-  // ── 🔴 Dialog chặn cứng — KHÔNG có nút "vẫn lưu" ──────────────────────────
-
   Future<void> _showBlockedDialog(String medicineName, String time) {
     return showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -461,28 +489,22 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
-              ),
+                  color: Colors.red.shade50, shape: BoxShape.circle),
               child: const Icon(Icons.dangerous_rounded,
                   color: Colors.red, size: 44),
             ),
             const SizedBox(height: 16),
-            Text(
-              'Trùng lịch uống!',
-              style: GoogleFonts.lexend(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.red.shade700),
-            ),
+            Text('Trùng lịch uống!',
+                style: GoogleFonts.lexend(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red.shade700)),
             const SizedBox(height: 12),
             RichText(
               textAlign: TextAlign.center,
               text: TextSpan(
                 style: GoogleFonts.lexend(
-                    fontSize: 14,
-                    color: Colors.grey.shade700,
-                    height: 1.6),
+                    fontSize: 14, color: Colors.grey.shade700, height: 1.6),
                 children: [
                   TextSpan(
                       text: '"$medicineName"',
@@ -491,7 +513,8 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                   TextSpan(
                       text: time,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const TextSpan(text: '.\n\nUống 2 lần cùng giờ có thể gây '),
+                  const TextSpan(
+                      text: '.\n\nUống 2 lần cùng giờ có thể gây '),
                   TextSpan(
                     text: 'QUÁ LIỀU nghiêm trọng',
                     style: TextStyle(
@@ -515,10 +538,8 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                       borderRadius: BorderRadius.circular(14)),
                   elevation: 0,
                 ),
-                child: Text(
-                  'Đã hiểu, sẽ đổi giờ khác',
-                  style: GoogleFonts.lexend(fontWeight: FontWeight.bold),
-                ),
+                child: Text('Đã hiểu, sẽ đổi giờ khác',
+                    style: GoogleFonts.lexend(fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -527,20 +548,14 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
-  // ── 🟡 Dialog cảnh báo mềm — có thể bỏ qua nếu bác sĩ chỉ định ───────────
-
   Future<bool> _showWarningDialog(
       String medicineName, double totalDose, [String? formType]) async {
     final unit = doseUnitFromFormType(formType);
-    final doseText = totalDose % 1 == 0
-        ? totalDose.toInt().toString()
-        : totalDose.toString();
-
+    final doseText = totalDose.toInt().toString();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -548,26 +563,20 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                shape: BoxShape.circle,
-              ),
+                  color: Colors.orange.shade50, shape: BoxShape.circle),
               child: const Icon(Icons.warning_amber_rounded,
                   color: Colors.orange, size: 44),
             ),
             const SizedBox(height: 16),
-            Text(
-              'Chú ý tổng liều!',
-              style: GoogleFonts.lexend(
-                  fontSize: 20, fontWeight: FontWeight.bold),
-            ),
+            Text('Chú ý tổng liều!',
+                style:
+                GoogleFonts.lexend(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             RichText(
               textAlign: TextAlign.center,
               text: TextSpan(
                 style: GoogleFonts.lexend(
-                    fontSize: 14,
-                    color: Colors.grey.shade700,
-                    height: 1.6),
+                    fontSize: 14, color: Colors.grey.shade700, height: 1.6),
                 children: [
                   TextSpan(
                       text: '"$medicineName"',
@@ -578,10 +587,10 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
               ),
             ),
             const SizedBox(height: 14),
-            // Badge tổng liều
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              padding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
               decoration: BoxDecoration(
                 color: Colors.orange.shade50,
                 borderRadius: BorderRadius.circular(14),
@@ -596,72 +605,61 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Tổng liều trong ngày',
-                        style: GoogleFonts.lexend(
-                            fontSize: 12, color: Colors.orange.shade700),
-                      ),
-                      Text(
-                        '$doseText $unit / ngày',
-                        style: GoogleFonts.lexend(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade800),
-                      ),
+                      Text('Tổng liều trong ngày',
+                          style: GoogleFonts.lexend(
+                              fontSize: 12, color: Colors.orange.shade700)),
+                      Text('$doseText $unit / ngày',
+                          style: GoogleFonts.lexend(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade800)),
                     ],
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 12),
-            Text(
-              'Chỉ tiếp tục nếu đây là chỉ định của bác sĩ.',
-              style: GoogleFonts.lexend(
-                  fontSize: 13,
-                  color: Colors.grey.shade500,
-                  fontStyle: FontStyle.italic),
-              textAlign: TextAlign.center,
-            ),
+            Text('Chỉ tiếp tục nếu đây là chỉ định của bác sĩ.',
+                style: GoogleFonts.lexend(
+                    fontSize: 13,
+                    color: Colors.grey.shade500,
+                    fontStyle: FontStyle.italic),
+                textAlign: TextAlign.center),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: BorderSide(color: Colors.grey.shade300),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                    ),
-                    child: Text(
-                      'Huỷ',
+            Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: BorderSide(color: Colors.grey.shade300),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: Text('Huỷ',
                       style: GoogleFonts.lexend(
                           color: Colors.grey.shade700,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ),
+                          fontWeight: FontWeight.w600)),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      elevation: 0,
-                    ),
-                    child: Text(
-                      'Vẫn thêm',
-                      style: GoogleFonts.lexend(fontWeight: FontWeight.bold),
-                    ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
                   ),
+                  child: Text('Vẫn thêm',
+                      style:
+                      GoogleFonts.lexend(fontWeight: FontWeight.bold)),
                 ),
-              ],
-            ),
+              ),
+            ]),
           ],
         ),
       ),
@@ -679,8 +677,9 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     ));
   }
 
-  // ── Build ───────────────────────────────────────────────────────────────────
-
+  // ══════════════════════════════════════════════════════════════════════════
+  // BUILD
+  // ══════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -708,11 +707,9 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                       const SizedBox(height: 24),
                       _buildLabelField(),
                       const SizedBox(height: 24),
-                      _buildDoseCounter(),
-                      const SizedBox(height: 24),
-                      _buildDayPicker(),
+                      _buildDatePicker(),        // ← thay thế day picker cũ
                       const SizedBox(height: 28),
-                      _buildMedicineSection(),
+                      _buildMedicineSection(),   // ← bỏ dose counter chung
                     ],
                   ),
                 ),
@@ -724,6 +721,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
+  // ── AppBar ─────────────────────────────────────────────────────────────────
   Widget _buildAppBar() {
     return SliverAppBar(
       pinned: true,
@@ -736,25 +734,18 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
       ),
       flexibleSpace: FlexibleSpaceBar(
         centerTitle: false,
-        // left: 56 = width leading button → không đè vào nút back khi collapsed
         titlePadding: const EdgeInsets.only(left: 56, bottom: 14, right: 16),
         title: Text(
           'Thiết lập lịch nhắc',
           style: GoogleFonts.lexend(
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-              color: Colors.white),
+              fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
         ),
         background: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF1E88E5),
-                Color(0xFF137FEC),
-                Color(0xFF0D6EDC),
-              ],
+              colors: [Color(0xFF1E88E5), Color(0xFF137FEC), Color(0xFF0D6EDC)],
             ),
           ),
         ),
@@ -762,6 +753,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
+  // ── Preset giờ ────────────────────────────────────────────────────────────
   Widget _buildPresetRow() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -797,6 +789,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
+  // ── Giờ uống ──────────────────────────────────────────────────────────────
   Widget _buildTimeCard() {
     return _Card(
       child: Row(
@@ -835,6 +828,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
+  // ── Chú thích ─────────────────────────────────────────────────────────────
   Widget _buildLabelField() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -845,8 +839,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
           padding: EdgeInsets.zero,
           child: TextField(
             controller: _labelController,
-            style:
-            GoogleFonts.lexend(fontSize: 16, fontWeight: FontWeight.w500),
+            style: GoogleFonts.lexend(fontSize: 16, fontWeight: FontWeight.w500),
             decoration: InputDecoration(
               hintText: 'Ví dụ: Sau ăn sáng...',
               hintStyle: GoogleFonts.lexend(color: Colors.grey.shade400),
@@ -862,166 +855,97 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
-  /// Trả về đơn vị uống dựa theo form_type
-  static String doseUnitFromFormType(String? formType) {
-    switch (formType) {
-      case 'vien_nang':
-      case 'vien_nen':
-      case 'vien_sui':
-        return 'viên';
-      case 'siro':
-      case 'dung_dich':
-      case 'nuoc':
-        return 'ml';
-      case 'tuyt':
-      case 'kem':
-        return 'tuýp';
-      case 'goi':
-        return 'gói';
-      case 'ong':
-        return 'ống';
-      default:
-        return 'lần';
-    }
-  }
-
-  /// Đơn vị của dose counter mặc định:
-  /// - Nếu không chọn thuốc nào → 'lần'
-  /// - Nếu tất cả thuốc đã chọn cùng form_type → đơn vị đó
-  /// - Nếu khác nhau → 'lần'
-  String get _defaultDoseUnit {
-    if (_selectedMedicines.isEmpty) return 'liều';
-    final selected = _medicines
-        .where((m) => _selectedMedicines.containsKey(m.id))
-        .toList();
-    if (selected.isEmpty) return 'liều';
-    final units = selected.map((m) => doseUnitFromFormType(m.formType)).toSet();
-    return units.length == 1 ? units.first : 'liều';
-  }
-
-  Widget _buildDoseCounter() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _Label(text: 'Liều lượng mặc định ($_defaultDoseUnit/lần)'),
-        const SizedBox(height: 10),
-        _Card(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _RoundBtn(
-                icon: Icons.remove_rounded,
-                onPressed: _doseQuantity > 0.5
-                    ? () => setState(() => _doseQuantity -= 0.5)
-                    : null,
-              ),
-              Column(
-                children: [
-                  Text(
-                    _doseQuantity % 1 == 0
-                        ? '${_doseQuantity.toInt()}'
-                        : '$_doseQuantity',
-                    style: GoogleFonts.lexend(
-                        fontSize: 38,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF137FEC)),
-                  ),
-                  Text('$_defaultDoseUnit / lần',
-                      style: GoogleFonts.lexend(
-                          fontSize: 13, color: Colors.grey.shade500)),
-                ],
-              ),
-              _RoundBtn(
-                icon: Icons.add_rounded,
-                onPressed: () => setState(() => _doseQuantity += 0.5),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDayPicker() {
+  // ── Chọn ngày theo lịch thực ──────────────────────────────────────────────
+  Widget _buildDatePicker() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _Label(text: 'Ngày uống trong tuần'),
-            _QuickBtn(
-              label: 'Tất cả',
-              onTap: () =>
-                  setState(() => _selectedDays.fillRange(0, 7, true)),
+            _Label(text: 'Ngày uống (${_selectedDates.length} đã chọn)'),
+            Row(
+              children: [
+                _QuickBtn(
+                  label: 'Hàng ngày',
+                  onTap: () => setState(
+                          () => _selectedDates
+                        ..clear()
+                        ..addAll(_dateOptions)),
+                ),
+                const SizedBox(width: 8),
+                _QuickBtn(
+                  label: 'Bỏ chọn',
+                  onTap: () =>
+                      setState(() => _selectedDates.clear()),
+                ),
+              ],
             ),
           ],
         ),
         const SizedBox(height: 10),
         _Card(
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(7, (i) {
-                  final sel = _selectedDays[i];
-                  return GestureDetector(
-                    onTap: () => setState(() => _selectedDays[i] = !sel),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: sel
-                            ? const Color(0xFF137FEC)
-                            : const Color(0xFFF0F4FF),
-                        shape: BoxShape.circle,
-                        boxShadow: sel
-                            ? [
-                          BoxShadow(
-                              color: const Color(0xFF137FEC)
-                                  .withOpacity(0.35),
-                              blurRadius: 8,
-                              offset: const Offset(0, 3))
-                        ]
-                            : [],
-                      ),
-                      child: Center(
-                        child: Text(_dayLabels[i],
-                            style: GoogleFonts.lexend(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: sel
-                                    ? Colors.white
-                                    : Colors.grey.shade500)),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-              const SizedBox(height: 14),
-              Row(children: [
-                _QuickBtn(
-                  label: 'T2–T6',
-                  onTap: () => setState(() {
-                    for (int i = 0; i < 7; i++) _selectedDays[i] = i < 5;
-                  }),
-                ),
-                const SizedBox(width: 8),
-                _QuickBtn(
-                  label: 'Cuối tuần',
-                  onTap: () => setState(() {
-                    for (int i = 0; i < 7; i++) _selectedDays[i] = i >= 5;
-                  }),
-                ),
-              ]),
-            ],
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+          child: SizedBox(
+            height: 88,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _dateOptions.length,
+              itemBuilder: (_, i) {
+                final date = _dateOptions[i];
+                final isSelected = _selectedDates.contains(date);
+                final isToday = i == 0;
+                return _DateChip(
+                  date: date,
+                  isSelected: isSelected,
+                  isToday: isToday,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() {
+                      if (isSelected) {
+                        _selectedDates.remove(date);
+                      } else {
+                        _selectedDates.add(date);
+                      }
+                    });
+                  },
+                );
+              },
+            ),
           ),
         ),
+        if (_selectedDates.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              _buildSelectedDatesLabel(),
+              style: GoogleFonts.lexend(
+                  fontSize: 12, color: Colors.grey.shade500),
+            ),
+          ),
+        ],
       ],
     );
   }
 
+  String _buildSelectedDatesLabel() {
+    final sorted = _selectedDates.toList()..sort();
+    if (sorted.length == 1) return _formatDateFull(sorted.first);
+    if (sorted.length <= 3) {
+      return sorted.map(_formatDateShort).join(', ');
+    }
+    return '${_formatDateShort(sorted.first)} – ${_formatDateShort(sorted.last)} (${sorted.length} ngày)';
+  }
+
+  String _formatDateFull(DateTime d) {
+    const days = ['', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'CN'];
+    return '${days[d.weekday]}, ${d.day}/${d.month}/${d.year}';
+  }
+
+  String _formatDateShort(DateTime d) => '${d.day}/${d.month}';
+
+  // ── Chọn thuốc ────────────────────────────────────────────────────────────
   Widget _buildMedicineSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1046,10 +970,11 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
           ..._medicines.map((med) => _MedicineTile(
             medicine: med,
             isSelected: _selectedMedicines.containsKey(med.id),
-            doseQty: _selectedMedicines[med.id] ?? _doseQuantity,
+            doseQty: _selectedMedicines[med.id] ?? 1,
             onToggle: (sel) => setState(() {
               if (sel) {
-                _selectedMedicines[med.id!] = _doseQuantity;
+                // Mặc định 1 khi mới chọn
+                _selectedMedicines[med.id!] = 1;
               } else {
                 _selectedMedicines.remove(med.id);
               }
@@ -1061,10 +986,20 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
+  // ── Bottom sheet ──────────────────────────────────────────────────────────
   Widget _buildBottomSheet() {
+    // Kiểm tra có thuốc nào đang bị chặn không (liều > kho)
+    final hasBlockedMedicine = _selectedMedicines.entries.any((entry) {
+      final med = _medicines.where((m) => m.id == entry.key);
+      if (med.isEmpty) return false;
+      return entry.value > med.first.stockCurrent;
+    });
+
     return Consumer<ScheduleViewModel>(
       builder: (context, vm, _) {
         final isLoading = vm.state == ScheduleViewState.loading;
+        final canSubmit = !isLoading && !hasBlockedMedicine;
+
         return Container(
           padding: EdgeInsets.fromLTRB(
               20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
@@ -1082,11 +1017,15 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
               width: double.infinity,
               height: 56,
               child: ElevatedButton(
-                onPressed: isLoading ? null : _submit,
+                onPressed: canSubmit ? _submit : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF137FEC),
+                  backgroundColor: hasBlockedMedicine
+                      ? Colors.red.shade400
+                      : const Color(0xFF137FEC),
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledBackgroundColor: hasBlockedMedicine
+                      ? Colors.red.shade200
+                      : Colors.grey.shade300,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16)),
                   elevation: 0,
@@ -1097,7 +1036,10 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                     width: 22,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5))
-                    : Text('XÁC NHẬN THIẾT LẬP',
+                    : Text(
+                    hasBlockedMedicine
+                        ? 'LIỀU VƯỢT QUÁ TỒN KHO'
+                        : 'XÁC NHẬN THIẾT LẬP',
                     style: GoogleFonts.lexend(
                         fontSize: 16, fontWeight: FontWeight.bold)),
               ),
@@ -1110,14 +1052,118 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Medicine Tile
+//  Date Chip — hiển thị 1 ngày trong calendar strip
+// ─────────────────────────────────────────────────────────────────────────────
+class _DateChip extends StatelessWidget {
+  final DateTime date;
+  final bool isSelected;
+  final bool isToday;
+  final VoidCallback onTap;
+
+  const _DateChip({
+    required this.date,
+    required this.isSelected,
+    required this.isToday,
+    required this.onTap,
+  });
+
+  static const _dayLabels = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        margin: const EdgeInsets.only(right: 10),
+        width: 52,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF137FEC)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: isToday && !isSelected
+              ? Border.all(color: const Color(0xFF137FEC), width: 1.5)
+              : Border.all(
+              color: isSelected
+                  ? const Color(0xFF137FEC)
+                  : Colors.grey.shade200),
+          boxShadow: isSelected
+              ? [
+            BoxShadow(
+                color: const Color(0xFF137FEC).withOpacity(0.30),
+                blurRadius: 8,
+                offset: const Offset(0, 3))
+          ]
+              : [],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              _dayLabels[date.weekday],
+              style: GoogleFonts.lexend(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: isSelected ? Colors.white70 : Colors.grey.shade500,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${date.day}',
+              style: GoogleFonts.lexend(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: isSelected ? Colors.white : const Color(0xFF111418),
+              ),
+            ),
+            const SizedBox(height: 4),
+            // Dot: "HN" nếu hôm nay, tháng/năm nếu khác tháng hiện tại
+            isToday
+                ? Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? Colors.white.withOpacity(0.25)
+                    : const Color(0xFF137FEC).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'HN',
+                style: GoogleFonts.lexend(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: isSelected
+                        ? Colors.white
+                        : const Color(0xFF137FEC)),
+              ),
+            )
+                : Text(
+              'th${date.month}',
+              style: GoogleFonts.lexend(
+                  fontSize: 9,
+                  color: isSelected
+                      ? Colors.white60
+                      : Colors.grey.shade400),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Medicine Tile — tích chọn + nhập liều riêng + cảnh báo inline
 // ─────────────────────────────────────────────────────────────────────────────
 class _MedicineTile extends StatelessWidget {
   final Medicine medicine;
   final bool isSelected;
-  final double doseQty;
+  final int doseQty;
   final ValueChanged<bool> onToggle;
-  final ValueChanged<double> onDoseChanged;
+  final ValueChanged<int> onDoseChanged;
 
   const _MedicineTile({
     required this.medicine,
@@ -1127,8 +1173,22 @@ class _MedicineTile extends StatelessWidget {
     required this.onDoseChanged,
   });
 
+  // ── Màu số liều tuỳ trạng thái ──────────────────────────────────────────
+  Color _doseColor() {
+    if (doseQty > medicine.stockCurrent) return Colors.red;
+    if ((medicine.stockCurrent - doseQty) < medicine.stockThreshold) {
+      return Colors.orange;
+    }
+    return const Color(0xFF137FEC);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final unit = _SetupDoseBodyState.doseUnitFromFormType(medicine.formType);
+    final isOverStock = doseQty > medicine.stockCurrent;
+    final isNearThreshold = !isOverStock &&
+        (medicine.stockCurrent - doseQty) < medicine.stockThreshold;
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       margin: const EdgeInsets.only(bottom: 10),
@@ -1136,14 +1196,16 @@ class _MedicineTile extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color:
-          isSelected ? const Color(0xFF137FEC) : Colors.grey.shade200,
+          color: isSelected
+              ? (isOverStock ? Colors.red : const Color(0xFF137FEC))
+              : Colors.grey.shade200,
           width: isSelected ? 2 : 1,
         ),
         boxShadow: isSelected
             ? [
           BoxShadow(
-              color: const Color(0xFF137FEC).withOpacity(0.12),
+              color: (isOverStock ? Colors.red : const Color(0xFF137FEC))
+                  .withOpacity(0.12),
               blurRadius: 12,
               offset: const Offset(0, 4))
         ]
@@ -1151,6 +1213,7 @@ class _MedicineTile extends StatelessWidget {
       ),
       child: Column(
         children: [
+          // ── Header: tên thuốc + checkbox ──────────────────────────────
           InkWell(
             onTap: () => onToggle(!isSelected),
             borderRadius: BorderRadius.circular(16),
@@ -1181,24 +1244,29 @@ class _MedicineTile extends StatelessWidget {
                       children: [
                         Text(medicine.name,
                             style: GoogleFonts.lexend(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600)),
-                        if (medicine.category != null ||
-                            medicine.dosageAmount != null)
+                                fontSize: 15, fontWeight: FontWeight.w600)),
+                        if (medicine.category != null)
+                          Text(medicine.category!,
+                              style: GoogleFonts.lexend(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade500)),
+                        // Tồn kho nhỏ luôn hiển thị khi đã chọn
+                        if (isSelected)
                           Text(
-                            [
-                              if (medicine.category != null)
-                                medicine.category!,
-                              if (medicine.dosageAmount != null)
-                                '${medicine.dosageAmount!.toInt()} ${medicine.dosageUnit ?? ''}'
-                            ].join(' • '),
+                            'Tồn kho: ${medicine.stockCurrent} $unit',
                             style: GoogleFonts.lexend(
-                                fontSize: 12,
-                                color: Colors.grey.shade500),
+                              fontSize: 11,
+                              color: medicine.stockCurrent <=
+                                  medicine.stockThreshold
+                                  ? Colors.orange.shade700
+                                  : Colors.grey.shade400,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                       ],
                     ),
                   ),
+                  // Badge sắp hết
                   if (medicine.isLowStock)
                     Container(
                       margin: const EdgeInsets.only(right: 8),
@@ -1224,62 +1292,154 @@ class _MedicineTile extends StatelessWidget {
               ),
             ),
           ),
+
+          // ── Panel nhập liều (chỉ hiện khi đã chọn) ───────────────────
           if (isSelected)
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: const Color(0xFF137FEC).withOpacity(0.05),
+                color: isOverStock
+                    ? Colors.red.withOpacity(0.04)
+                    : const Color(0xFF137FEC).withOpacity(0.04),
                 borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(14),
                   bottomRight: Radius.circular(14),
                 ),
               ),
-              child: Row(
+              child: Column(
                 children: [
-                  Text('Liều cho thuốc này:',
-                      style: GoogleFonts.lexend(
-                          fontSize: 13, color: Colors.grey.shade600)),
-                  const Spacer(),
-                  _RoundBtn(
-                    icon: Icons.remove_rounded,
-                    size: 32,
-                    onPressed: doseQty > 0.5
-                        ? () => onDoseChanged(doseQty - 0.5)
-                        : null,
+                  // Counter liều
+                  Row(
+                    children: [
+                      Text('Số lượng mỗi lần:',
+                          style: GoogleFonts.lexend(
+                              fontSize: 13, color: Colors.grey.shade600)),
+                      const Spacer(),
+                      // Nút trừ
+                      _RoundBtn(
+                        icon: Icons.remove_rounded,
+                        size: 34,
+                        onPressed: doseQty > 1
+                            ? () => onDoseChanged(doseQty - 1)
+                            : null,
+                      ),
+                      // Số liều
+                      Padding(
+                        padding:
+                        const EdgeInsets.symmetric(horizontal: 16),
+                        child: Column(
+                          children: [
+                            Text(
+                              '$doseQty',
+                              style: GoogleFonts.lexend(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: _doseColor(),
+                              ),
+                            ),
+                            Text(
+                              unit,
+                              style: GoogleFonts.lexend(
+                                  fontSize: 10,
+                                  color: Colors.grey.shade400),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Nút cộng — disable khi chạm stockCurrent
+                      _RoundBtn(
+                        icon: Icons.add_rounded,
+                        size: 34,
+                        onPressed: doseQty < medicine.stockCurrent
+                            ? () => onDoseChanged(doseQty + 1)
+                            : null,
+                      ),
+                    ],
                   ),
-                  Padding(
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 14),
-                    child: Column(
-                      children: [
-                        Text(
-                          doseQty % 1 == 0
-                              ? '${doseQty.toInt()}'
-                              : '$doseQty',
-                          style: GoogleFonts.lexend(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: const Color(0xFF137FEC)),
-                        ),
-                        Text(
-                          _SetupDoseBodyState.doseUnitFromFormType(
-                              medicine.formType),
-                          style: GoogleFonts.lexend(
-                              fontSize: 10,
-                              color: Colors.grey.shade400),
-                        ),
-                      ],
+
+                  // ── Cảnh báo inline ──────────────────────────────────
+                  if (isOverStock) ...[
+                    const SizedBox(height: 8),
+                    _InlineWarning(
+                      icon: Icons.block_rounded,
+                      color: Colors.red,
+                      isBlocking: true,
+                      text:
+                      'Không đủ thuốc! Tồn kho chỉ còn ${ medicine.stockCurrent} $unit',
                     ),
-                  ),
-                  _RoundBtn(
-                    icon: Icons.add_rounded,
-                    size: 32,
-                    onPressed: () => onDoseChanged(doseQty + 0.5),
-                  ),
+                  ] else if (isNearThreshold) ...[
+                    const SizedBox(height: 8),
+                    _InlineWarning(
+                      icon: Icons.warning_amber_rounded,
+                      color: Colors.orange,
+                      isBlocking: false,
+                      text:
+                      'Sau lần uống này còn ${medicine.stockCurrent - doseQty} $unit '
+                          '— dưới ngưỡng cảnh báo (${medicine.stockThreshold})',
+                    ),
+                  ],
                 ],
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Inline warning banner
+// ─────────────────────────────────────────────────────────────────────────────
+class _InlineWarning extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String text;
+  final bool isBlocking;
+
+  const _InlineWarning({
+    required this.icon,
+    required this.color,
+    required this.text,
+    this.isBlocking = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(text,
+                style: GoogleFonts.lexend(
+                    fontSize: 11,
+                    color: color,
+                    fontWeight: FontWeight.w600)),
+          ),
+          if (isBlocking) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text('Không thể lưu',
+                  style: GoogleFonts.lexend(
+                      fontSize: 10,
+                      color: color,
+                      fontWeight: FontWeight.bold)),
+            ),
+          ],
         ],
       ),
     );
@@ -1363,8 +1523,7 @@ class _PresetTile extends StatelessWidget {
                 style: GoogleFonts.lexend(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color:
-                    isActive ? Colors.white : Colors.grey.shade700)),
+                    color: isActive ? Colors.white : Colors.grey.shade700)),
           ],
         ),
       ),
@@ -1415,8 +1574,7 @@ class _QuickBtn extends StatelessWidget {
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         side: const BorderSide(color: Color(0xFF137FEC)),
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       child: Text(label,
           style: GoogleFonts.lexend(

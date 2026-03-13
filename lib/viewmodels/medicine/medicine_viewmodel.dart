@@ -170,6 +170,26 @@ class MedicineViewmodel extends ChangeNotifier {
     }
   }
 
+  void patchStock(int medicineId, int newStock) {
+    final idx = _medicines.indexWhere((m) => m.id == medicineId);
+    if (idx == -1) return;
+
+    final old = _medicines[idx];
+    _medicines[idx] = MedicineResponseDto(
+      id:             old.id,
+      userId:         old.userId,
+      name:           old.name,
+      category:       old.category,
+      dosageAmount:   old.dosageAmount,
+      dosageUnit:     old.dosageUnit,
+      formType:       old.formType,
+      stockCurrent:   newStock,       // ← chỉ đổi mỗi cái này
+      stockThreshold: old.stockThreshold,
+      status:         old.status,
+    );
+    notifyListeners();
+  }
+
   // Clear error
   void clearError() {
     _error = null;

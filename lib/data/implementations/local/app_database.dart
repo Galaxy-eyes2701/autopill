@@ -109,7 +109,6 @@ class AppDatabase {
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Thêm created_at và updated_at cho medicines table
       await db.execute('''
         ALTER TABLE medicines ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP
       ''');
@@ -149,13 +148,11 @@ class AppDatabase {
   // ================= SEED DATA =================
   Future<void> seedData(Database db) async {
 
-
     // Kiểm tra nếu đã có user rồi thì không seed nữa
     final existing = await db.query('users');
     if (existing.isNotEmpty) return;
 
-    final hashedPassword =
-    SecurityUtil.hashPassword("123456"); // password test
+    final hashedPassword = SecurityUtil.hashPassword("123456");
 
     // ===== Insert User =====
     final userId = await db.insert('users', {
@@ -165,91 +162,153 @@ class AppDatabase {
       'dob': '2000-05-20'
     });
 
-    // ===== 10 Medicines =====
-    List<Map<String, dynamic>> medicines = [
+    // ===== 10 Medicines — thống nhất 6 form_type với AddMedicineStockScreen =====
+    // form_type : vien_nang | vien_sui | long | tuyt | goi  | tiem
+    // dosage_unit: viên     | viên     | ml   | tuýp | gói  | ống
+    final List<Map<String, dynamic>> medicines = [
+
+      // ── 1. Viên nang ──────────────────────────────────────────────────────
       {
         'name': 'Panadol Extra',
-        'category': 'Giảm đau',
+        'category': 'Giảm đau, hạ sốt',
         'active_ingredient': 'Paracetamol',
         'registration_number': 'VN-001',
-        'dosage_amount': 500,
-        'dosage_unit': 'mg',
+        'dosage_amount': 1,
+        'dosage_unit': 'viên',
         'form_type': 'vien_nang',
         'stock_current': 20,
         'stock_threshold': 5,
         'status': 'active',
-        'instructions': 'Uống sau ăn'
+        'instructions': 'Uống sau ăn, 1 viên/lần',
       },
       {
-        'name': 'Vitamin C 1000',
-        'category': 'Vitamin',
-        'active_ingredient': 'Ascorbic Acid',
-        'registration_number': 'VN-002',
-        'dosage_amount': 1000,
-        'dosage_unit': 'mg',
-        'form_type': 'vien_sui',
-        'stock_current': 15,
-        'stock_threshold': 3,
-        'status': 'active',
-        'instructions': 'Hòa tan với nước'
-      },
-      {
-        'name': 'Amoxicillin',
+        'name': 'Amoxicillin 500mg',
         'category': 'Kháng sinh',
         'active_ingredient': 'Amoxicillin',
-        'registration_number': 'VN-003',
-        'dosage_amount': 500,
-        'dosage_unit': 'mg',
+        'registration_number': 'VN-002',
+        'dosage_amount': 1,
+        'dosage_unit': 'viên',
         'form_type': 'vien_nang',
         'stock_current': 30,
-        'stock_threshold': 5,
+        'stock_threshold': 6,
         'status': 'active',
-        'instructions': 'Uống đủ liệu trình'
+        'instructions': 'Uống đủ liệu trình, 3 lần/ngày',
       },
       {
         'name': 'Omega 3',
         'category': 'Thực phẩm bổ sung',
         'active_ingredient': 'Fish Oil',
-        'registration_number': 'VN-004',
-        'dosage_amount': 1000,
-        'dosage_unit': 'mg',
+        'registration_number': 'VN-003',
+        'dosage_amount': 1,
+        'dosage_unit': 'viên',
         'form_type': 'vien_nang',
-        'stock_current': 25,
-        'stock_threshold': 5,
+        'stock_current': 60,
+        'stock_threshold': 10,
         'status': 'active',
-        'instructions': 'Uống sau ăn sáng'
+        'instructions': 'Uống sau ăn sáng, 1 viên/ngày',
       },
+
+      // ── 2. Viên sủi ───────────────────────────────────────────────────────
+      {
+        'name': 'Vitamin C 1000',
+        'category': 'Bổ sung vitamin',
+        'active_ingredient': 'Ascorbic Acid',
+        'registration_number': 'VN-004',
+        'dosage_amount': 1,
+        'dosage_unit': 'viên',
+        'form_type': 'vien_sui',
+        'stock_current': 20,
+        'stock_threshold': 4,
+        'status': 'active',
+        'instructions': 'Hòa tan 1 viên vào 200ml nước',
+      },
+
+      // ── 3. Dạng lỏng ──────────────────────────────────────────────────────
+      {
+        'name': 'Siro ho Prospan',
+        'category': 'Hô hấp, giảm ho',
+        'active_ingredient': 'Hedera Helix',
+        'registration_number': 'VN-005',
+        'dosage_amount': 5,
+        'dosage_unit': 'ml',
+        'form_type': 'long',
+        'stock_current': 100,
+        'stock_threshold': 15,
+        'status': 'active',
+        'instructions': 'Uống 5ml x 3 lần/ngày sau ăn',
+      },
+
+      // ── 4. Tuýp / Kem ─────────────────────────────────────────────────────
+      {
+        'name': 'Voltaren Emulgel',
+        'category': 'Giảm đau cơ xương khớp',
+        'active_ingredient': 'Diclofenac',
+        'registration_number': 'VN-006',
+        'dosage_amount': 1,
+        'dosage_unit': 'tuýp',
+        'form_type': 'tuyt',
+        'stock_current': 3,
+        'stock_threshold': 1,
+        'status': 'active',
+        'instructions': 'Bôi 2-3 lần/ngày lên vùng đau',
+      },
+
+      // ── 5. Gói bột ────────────────────────────────────────────────────────
       {
         'name': 'Berberin',
         'category': 'Tiêu hóa',
         'active_ingredient': 'Berberine',
-        'registration_number': 'VN-005',
-        'dosage_amount': 100,
-        'dosage_unit': 'mg',
-        'form_type': 'vien_nen',
-        'stock_current': 40,
-        'stock_threshold': 10,
+        'registration_number': 'VN-007',
+        'dosage_amount': 2,
+        'dosage_unit': 'gói',
+        'form_type': 'goi',
+        'stock_current': 30,
+        'stock_threshold': 6,
         'status': 'active',
-        'instructions': 'Uống khi đau bụng'
+        'instructions': 'Pha 1 gói với 100ml nước ấm',
+      },
+      {
+        'name': 'Oresol',
+        'category': 'Bù điện giải',
+        'active_ingredient': 'NaCl, KCl, Glucose',
+        'registration_number': 'VN-008',
+        'dosage_amount': 1,
+        'dosage_unit': 'gói',
+        'form_type': 'goi',
+        'stock_current': 20,
+        'stock_threshold': 4,
+        'status': 'active',
+        'instructions': 'Pha 1 gói vào 200ml nước sôi để nguội',
+      },
+
+      // ── 6. Dạng tiêm ──────────────────────────────────────────────────────
+      {
+        'name': 'Vitamin B12',
+        'category': 'Bổ sung vitamin',
+        'active_ingredient': 'Cyanocobalamin',
+        'registration_number': 'VN-009',
+        'dosage_amount': 1,
+        'dosage_unit': 'ống',
+        'form_type': 'tiem',
+        'stock_current': 10,
+        'stock_threshold': 2,
+        'status': 'active',
+        'instructions': 'Tiêm bắp theo chỉ định bác sĩ',
+      },
+      {
+        'name': 'Insulin Novomix',
+        'category': 'Tiểu đường',
+        'active_ingredient': 'Insulin Aspart',
+        'registration_number': 'VN-010',
+        'dosage_amount': 1,
+        'dosage_unit': 'ống',
+        'form_type': 'tiem',
+        'stock_current': 5,
+        'stock_threshold': 1,
+        'status': 'active',
+        'instructions': 'Tiêm dưới da trước bữa ăn',
       },
     ];
-
-    // thêm 5 thuốc clone cho đủ 10
-    for (int i = 6; i <= 10; i++) {
-      medicines.add({
-        'name': 'Test Medicine $i',
-        'category': 'Khác',
-        'active_ingredient': 'Ingredient $i',
-        'registration_number': 'VN-00$i',
-        'dosage_amount': 250,
-        'dosage_unit': 'mg',
-        'form_type': 'vien_nang',
-        'stock_current': 10 + i,
-        'stock_threshold': 3,
-        'status': 'active',
-        'instructions': 'Uống theo chỉ định'
-      });
-    }
 
     for (var med in medicines) {
       med['user_id'] = userId;
@@ -279,9 +338,8 @@ class AppDatabase {
       await db.insert('notifications', {
         'schedule_id': scheduleId,
         'notification_id_flutter': scheduleId + 1000,
-        'fire_time': now.add(Duration(hours: 1)).millisecondsSinceEpoch
+        'fire_time': now.add(const Duration(hours: 1)).millisecondsSinceEpoch
       });
     }
   }
-
 }
