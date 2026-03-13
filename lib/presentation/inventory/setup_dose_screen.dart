@@ -90,6 +90,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
             ? (r['dosage_amount'] as num).toDouble()
             : null,
         dosageUnit: r['dosage_unit'] as String?,
+        formType: r['form_type'] as String?,
         stockCurrent: r['stock_current'] as int? ?? 0,
         stockThreshold: r['stock_threshold'] as int? ?? 0,
         status: r['status'] as String? ?? 'active',
@@ -165,6 +166,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
           medicine.name,
           stockResult.stockCurrent,
           stockResult.daysCanCover,
+          medicine.formType,
         );
         if (!mounted) return;
         if (!confirmed) return;
@@ -192,6 +194,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
         final confirmed = await _showWarningDialog(
           medicine.name,
           result.totalDoseToday!,
+          medicine.formType,
         );
         if (!mounted) return;
         if (!confirmed) return;
@@ -292,7 +295,9 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
   // ── 🟡 Sắp hết thuốc — cảnh báo mềm ─────────────────────────────────────
 
   Future<bool> _showStockLowDialog(
-      String medicineName, int stockCurrent, int daysCanCover) async {
+      String medicineName, int stockCurrent, int daysCanCover,
+      [String? formType]) async {
+    final unit = doseUnitFromFormType(formType);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -352,7 +357,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                             style: GoogleFonts.lexend(
                                 fontSize: 12,
                                 color: Colors.orange.shade700)),
-                        Text('$stockCurrent viên',
+                        Text('$stockCurrent $unit',
                             style: GoogleFonts.lexend(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
@@ -525,7 +530,8 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
   // ── 🟡 Dialog cảnh báo mềm — có thể bỏ qua nếu bác sĩ chỉ định ───────────
 
   Future<bool> _showWarningDialog(
-      String medicineName, double totalDose) async {
+      String medicineName, double totalDose, [String? formType]) async {
+    final unit = doseUnitFromFormType(formType);
     final doseText = totalDose % 1 == 0
         ? totalDose.toInt().toString()
         : totalDose.toString();
@@ -596,7 +602,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                             fontSize: 12, color: Colors.orange.shade700),
                       ),
                       Text(
-                        '$doseText viên / ngày',
+                        '$doseText $unit / ngày',
                         style: GoogleFonts.lexend(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -729,11 +735,15 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
         onPressed: () => Navigator.pop(context),
       ),
       flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+        centerTitle: false,
+        // left: 56 = width leading button → không đè vào nút back khi collapsed
+        titlePadding: const EdgeInsets.only(left: 56, bottom: 14, right: 16),
         title: Text(
           'Thiết lập lịch nhắc',
           style: GoogleFonts.lexend(
-              fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white),
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              color: Colors.white),
         ),
         background: Container(
           decoration: const BoxDecoration(
@@ -743,16 +753,8 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
               colors: [
                 Color(0xFF1E88E5),
                 Color(0xFF137FEC),
-                Color(0xFF0D6EDC)
+                Color(0xFF0D6EDC),
               ],
-            ),
-          ),
-          child: Align(
-            alignment: Alignment.topRight,
-            child: Opacity(
-              opacity: 0.08,
-              child: Icon(Icons.alarm_add_rounded,
-                  size: 160, color: Colors.white),
             ),
           ),
         ),
@@ -837,7 +839,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _Label(text: 'Tên lịch nhắc'),
+        _Label(text: 'Chú thích'),
         const SizedBox(height: 10),
         _Card(
           padding: EdgeInsets.zero,
@@ -860,11 +862,48 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     );
   }
 
+  /// Trả về đơn vị uống dựa theo form_type
+  static String doseUnitFromFormType(String? formType) {
+    switch (formType) {
+      case 'vien_nang':
+      case 'vien_nen':
+      case 'vien_sui':
+        return 'viên';
+      case 'siro':
+      case 'dung_dich':
+      case 'nuoc':
+        return 'ml';
+      case 'tuyt':
+      case 'kem':
+        return 'tuýp';
+      case 'goi':
+        return 'gói';
+      case 'ong':
+        return 'ống';
+      default:
+        return 'lần';
+    }
+  }
+
+  /// Đơn vị của dose counter mặc định:
+  /// - Nếu không chọn thuốc nào → 'lần'
+  /// - Nếu tất cả thuốc đã chọn cùng form_type → đơn vị đó
+  /// - Nếu khác nhau → 'lần'
+  String get _defaultDoseUnit {
+    if (_selectedMedicines.isEmpty) return 'liều';
+    final selected = _medicines
+        .where((m) => _selectedMedicines.containsKey(m.id))
+        .toList();
+    if (selected.isEmpty) return 'liều';
+    final units = selected.map((m) => doseUnitFromFormType(m.formType)).toSet();
+    return units.length == 1 ? units.first : 'liều';
+  }
+
   Widget _buildDoseCounter() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _Label(text: 'Liều lượng mặc định (viên/lần)'),
+        _Label(text: 'Liều lượng mặc định ($_defaultDoseUnit/lần)'),
         const SizedBox(height: 10),
         _Card(
           child: Row(
@@ -887,7 +926,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                         fontWeight: FontWeight.bold,
                         color: const Color(0xFF137FEC)),
                   ),
-                  Text('viên / lần',
+                  Text('$_defaultDoseUnit / lần',
                       style: GoogleFonts.lexend(
                           fontSize: 13, color: Colors.grey.shade500)),
                 ],
@@ -1212,14 +1251,25 @@ class _MedicineTile extends StatelessWidget {
                   Padding(
                     padding:
                     const EdgeInsets.symmetric(horizontal: 14),
-                    child: Text(
-                      doseQty % 1 == 0
-                          ? '${doseQty.toInt()}'
-                          : '$doseQty',
-                      style: GoogleFonts.lexend(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF137FEC)),
+                    child: Column(
+                      children: [
+                        Text(
+                          doseQty % 1 == 0
+                              ? '${doseQty.toInt()}'
+                              : '$doseQty',
+                          style: GoogleFonts.lexend(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFF137FEC)),
+                        ),
+                        Text(
+                          _SetupDoseBodyState.doseUnitFromFormType(
+                              medicine.formType),
+                          style: GoogleFonts.lexend(
+                              fontSize: 10,
+                              color: Colors.grey.shade400),
+                        ),
+                      ],
                     ),
                   ),
                   _RoundBtn(

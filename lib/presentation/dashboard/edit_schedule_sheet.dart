@@ -13,6 +13,8 @@ Future<void> showEditScheduleSheet(
       required Schedule schedule,
       required String medicineName,
       required VoidCallback onUpdated,
+      String intakeStatus = 'pending',
+      String? formType,
     }) {
   return showModalBottomSheet(
     context: context,
@@ -22,6 +24,8 @@ Future<void> showEditScheduleSheet(
       schedule: schedule,
       medicineName: medicineName,
       onUpdated: onUpdated,
+      intakeStatus: intakeStatus,
+      formType: formType,
     ),
   );
 }
@@ -30,11 +34,15 @@ class _EditScheduleSheet extends StatefulWidget {
   final Schedule schedule;
   final String medicineName;
   final VoidCallback onUpdated;
+  final String intakeStatus;
+  final String? formType;
 
   const _EditScheduleSheet({
     required this.schedule,
     required this.medicineName,
     required this.onUpdated,
+    this.intakeStatus = 'pending',
+    this.formType,
   });
 
   @override
@@ -52,7 +60,6 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
   @override
   void initState() {
     super.initState();
-    // Parse giờ hiện tại của schedule
     final parts = widget.schedule.time.split(':');
     _selectedTime = TimeOfDay(
       hour: int.parse(parts[0]),
@@ -70,6 +77,22 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
 
   String get _timeString =>
       '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}';
+
+  bool get _isTaken => widget.intakeStatus == 'taken';
+
+  /// Bước tăng/giảm liều: dạng lỏng (ml) → 0.5, còn lại → 1 (số nguyên)
+  double get _doseStep {
+    switch (widget.formType) {
+      case 'siro':
+      case 'dung_dich':
+      case 'nuoc':
+        return 0.5;
+      default:
+        return 1.0;
+    }
+  }
+
+  double get _doseMin => _doseStep;
 
   Future<void> _pickTime() async {
     final picked = await showTimePicker(
@@ -114,6 +137,21 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
         duration: const Duration(seconds: 2),
       ));
     }
+  }
+
+  void _showCannotDeleteSnack() {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [
+        const Icon(Icons.lock_rounded, color: Colors.white, size: 16),
+        const SizedBox(width: 8),
+        Text('Không thể xoá lịch đã uống hôm nay',
+            style: GoogleFonts.lexend(color: Colors.white, fontSize: 13)),
+      ]),
+      backgroundColor: Colors.grey.shade700,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      duration: const Duration(seconds: 2),
+    ));
   }
 
   Future<void> _confirmDelete() async {
@@ -214,56 +252,106 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                   ],
                 ),
               ),
-              // Nút xoá
+              // Nút xoá — disabled nếu đã uống hôm nay
               IconButton(
-                onPressed: _confirmDelete,
-                icon: const Icon(Icons.delete_outline_rounded,
-                    color: Colors.red, size: 26),
-                tooltip: 'Xoá lịch này',
+                onPressed: _isTaken ? _showCannotDeleteSnack : _confirmDelete,
+                icon: Icon(
+                  Icons.delete_outline_rounded,
+                  color: _isTaken ? Colors.grey.shade300 : Colors.red,
+                  size: 26,
+                ),
+                tooltip: _isTaken
+                    ? 'Không thể xoá sau khi đã uống'
+                    : 'Xoá lịch này',
               ),
             ],
           ),
           const SizedBox(height: 24),
 
+          // ── Banner đã uống ──
+          if (_isTaken) ...[
+            Container(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle_rounded,
+                      color: Colors.green.shade600, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Đã uống hôm nay — không thể chỉnh sửa cữ này',
+                      style: GoogleFonts.lexend(
+                          fontSize: 13,
+                          color: Colors.green.shade700,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // ── Chọn giờ ──
           _SectionLabel(icon: Icons.access_time_rounded, label: 'Giờ uống'),
           const SizedBox(height: 10),
           GestureDetector(
-            onTap: _pickTime,
-            child: Container(
-              padding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              decoration: BoxDecoration(
-                color: _blue.withOpacity(0.06),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _blue.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.schedule_rounded, color: _blue, size: 22),
-                  const SizedBox(width: 12),
-                  Text(
-                    _timeString,
-                    style: GoogleFonts.lexend(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: _blue),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _blue,
-                      borderRadius: BorderRadius.circular(10),
+            onTap: _isTaken ? null : _pickTime,
+            child: Opacity(
+              opacity: _isTaken ? 0.45 : 1.0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 20, vertical: 16),
+                decoration: BoxDecoration(
+                  color: _isTaken
+                      ? Colors.grey.shade100
+                      : _blue.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                      color: _isTaken
+                          ? Colors.grey.shade300
+                          : _blue.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.schedule_rounded,
+                        color: _isTaken ? Colors.grey.shade400 : _blue,
+                        size: 22),
+                    const SizedBox(width: 12),
+                    Text(
+                      _timeString,
+                      style: GoogleFonts.lexend(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color:
+                          _isTaken ? Colors.grey.shade400 : _blue),
                     ),
-                    child: Text('Đổi giờ',
-                        style: GoogleFonts.lexend(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                ],
+                    const Spacer(),
+                    if (!_isTaken)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _blue,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text('Đổi giờ',
+                            style: GoogleFonts.lexend(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold)),
+                      )
+                    else
+                      Icon(Icons.lock_rounded,
+                          color: Colors.grey.shade400, size: 18),
+                  ],
+                ),
               ),
             ),
           ),
@@ -271,92 +359,139 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
 
           // ── Nhãn cữ ──
           _SectionLabel(
-              icon: Icons.label_outline_rounded, label: 'Nhãn cữ uống'),
+              icon: Icons.label_outline_rounded, label: 'Chú thích'),
           const SizedBox(height: 10),
-          TextField(
-            controller: _labelCtrl,
-            style: GoogleFonts.lexend(fontSize: 15),
-            decoration: InputDecoration(
-              hintText: 'VD: Cữ sáng, Sau bữa tối...',
-              hintStyle:
-              GoogleFonts.lexend(color: Colors.grey.shade400, fontSize: 14),
-              filled: true,
-              fillColor: Colors.grey.shade50,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: Colors.grey.shade200),
+          Opacity(
+            opacity: _isTaken ? 0.45 : 1.0,
+            child: TextField(
+              controller: _labelCtrl,
+              enabled: !_isTaken,
+              style: GoogleFonts.lexend(fontSize: 15),
+              decoration: InputDecoration(
+                hintText: 'VD: Sau ăn sáng, Sau bữa tối...',
+                hintStyle: GoogleFonts.lexend(
+                    color: Colors.grey.shade400, fontSize: 14),
+                filled: true,
+                fillColor: _isTaken
+                    ? Colors.grey.shade100
+                    : Colors.grey.shade50,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.grey.shade200),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.grey.shade200),
+                ),
+                disabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.grey.shade200),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide:
+                  const BorderSide(color: _blue, width: 1.5),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 14),
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: Colors.grey.shade200),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: _blue, width: 1.5),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 14),
             ),
           ),
           const SizedBox(height: 20),
 
-          // ── Số viên ──
+          // ── Số liều ──
           _SectionLabel(
-              icon: Icons.medication_rounded, label: 'Số viên mỗi lần'),
+              icon: Icons.medication_rounded,
+              label: 'Liều lượng mỗi lần'),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              _RoundBtn(
-                icon: Icons.remove,
-                onTap: () {
-                  if (_doseQty > 0.5) {
-                    setState(() => _doseQty =
-                        double.parse((_doseQty - 0.5).toStringAsFixed(1)));
-                  }
-                },
-              ),
-              Expanded(
-                child: Center(
-                  child: Text(
-                    _doseQty % 1 == 0
-                        ? _doseQty.toInt().toString()
-                        : _doseQty.toString(),
-                    style: GoogleFonts.lexend(
-                        fontSize: 28, fontWeight: FontWeight.bold),
+          Opacity(
+            opacity: _isTaken ? 0.45 : 1.0,
+            child: Row(
+              children: [
+                _RoundBtn(
+                  icon: Icons.remove,
+                  onTap: _isTaken
+                      ? () {}
+                      : () {
+                    if (_doseQty > _doseMin) {
+                      setState(() => _doseQty = double.parse(
+                          (_doseQty - _doseStep)
+                              .toStringAsFixed(1)));
+                    }
+                  },
+                  disabled: _isTaken || _doseQty <= _doseMin,
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      _doseQty % 1 == 0
+                          ? _doseQty.toInt().toString()
+                          : _doseQty.toString(),
+                      style: GoogleFonts.lexend(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: _isTaken
+                              ? Colors.grey.shade400
+                              : Colors.black),
+                    ),
                   ),
                 ),
-              ),
-              _RoundBtn(
-                icon: Icons.add,
-                onTap: () => setState(() => _doseQty =
-                    double.parse((_doseQty + 0.5).toStringAsFixed(1))),
-              ),
-            ],
+                _RoundBtn(
+                  icon: Icons.add,
+                  onTap: _isTaken
+                      ? () {}
+                      : () => setState(() => _doseQty = double.parse(
+                      (_doseQty + _doseStep).toStringAsFixed(1))),
+                  disabled: _isTaken,
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 32),
 
-          // ── Nút lưu ──
+          // ── Nút lưu ── (disabled khi đã uống hoặc đang lưu)
           SizedBox(
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
-              onPressed: _isSaving ? null : _save,
+              onPressed: (_isSaving || _isTaken) ? null : _save,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _blue,
+                backgroundColor:
+                _isTaken ? Colors.grey.shade300 : _blue,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey.shade300,
+                disabledForegroundColor: Colors.grey.shade500,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16)),
                 elevation: 0,
               ),
               child: _isSaving
                   ? const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2.5))
-                  : Text('Lưu thay đổi',
-                  style: GoogleFonts.lexend(
-                      fontSize: 16, fontWeight: FontWeight.bold)),
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2.5),
+              )
+                  : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _isTaken
+                        ? Icons.lock_rounded
+                        : Icons.save_rounded,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isTaken
+                        ? 'Không thể chỉnh sửa'
+                        : 'Lưu thay đổi',
+                    style: GoogleFonts.lexend(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -390,20 +525,28 @@ class _SectionLabel extends StatelessWidget {
 class _RoundBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _RoundBtn({required this.icon, required this.onTap});
+  final bool disabled;
+  const _RoundBtn(
+      {required this.icon, required this.onTap, this.disabled = false});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: disabled ? null : onTap,
       child: Container(
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          color: const Color(0xFF137FEC).withOpacity(0.1),
+          color: disabled
+              ? Colors.grey.shade100
+              : const Color(0xFF137FEC).withOpacity(0.1),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Icon(icon, color: const Color(0xFF137FEC), size: 22),
+        child: Icon(icon,
+            color: disabled
+                ? Colors.grey.shade300
+                : const Color(0xFF137FEC),
+            size: 22),
       ),
     );
   }
