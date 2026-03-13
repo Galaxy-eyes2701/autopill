@@ -9,9 +9,9 @@ import 'package:autopill/di.dart';
 
 import '../../viewmodels/schedule/schedule_viewmodel.dart';
 import 'edit_schedule_sheet.dart';
+import 'package:autopill/presentation/notification/notification_screen.dart';
 
-/// RouteObserver toàn cục — đăng ký trong MaterialApp.navigatorObservers
-/// để DashboardScreen tự reload khi user quay lại từ màn hình khác
+/// RouteObserver toàn cục
 final RouteObserver<ModalRoute<void>> dashboardRouteObserver =
 RouteObserver<ModalRoute<void>>();
 
@@ -36,24 +36,44 @@ class _DashboardBody extends StatefulWidget {
 
 class _DashboardBodyState extends State<_DashboardBody>
     with SingleTickerProviderStateMixin, RouteAware {
+  // ── State ──────────────────────────────────────────────────────────────────
   final Map<int, String> _intakeStatus = {};
   final Map<int, String> _medicineNames = {};
   final Map<int, String> _medicineCategories = {};
+  final Map<int, String> _medicineFormTypes = {};
   int _userId = 0;
+
+  /// Ngày đang xem (mặc định hôm nay)
+  DateTime _selectedDate = DateTime.now();
+
+  bool get _isToday {
+    final now = DateTime.now();
+    return _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+  }
+
+  bool get _isFuture {
+    final today = DateTime(
+        DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final sel =
+    DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    return sel.isAfter(today);
+  }
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
 
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
     _animController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 600));
+        vsync: this, duration: const Duration(milliseconds: 500));
     _fadeAnim =
         CurvedAnimation(parent: _animController, curve: Curves.easeOut);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Đăng ký RouteObserver
       final route = ModalRoute.of(context);
       if (route != null) dashboardRouteObserver.subscribe(this, route);
       await _init();
@@ -67,12 +87,10 @@ class _DashboardBodyState extends State<_DashboardBody>
     super.dispose();
   }
 
-  /// Gọi tự động khi user POP màn hình khác (vd: SetupDoseScreen) và quay về đây
   @override
-  void didPopNext() {
-    _refresh();
-  }
+  void didPopNext() => _refresh();
 
+  // ── Data ───────────────────────────────────────────────────────────────────
   Future<void> _refresh() async {
     _animController.reset();
     await _init();
@@ -81,7 +99,6 @@ class _DashboardBodyState extends State<_DashboardBody>
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
     _userId = prefs.getInt('userId') ?? 0;
-
     if (_userId == 0) return;
 
     await context.read<ScheduleViewModel>().loadActiveSchedulesByUser(_userId);
@@ -93,25 +110,30 @@ class _DashboardBodyState extends State<_DashboardBody>
     final db = await AppDatabase.instance.database;
     final schedules = context.read<ScheduleViewModel>().schedules;
 
-    // ── Xoá data cũ trước khi load lại ──
-    // Không clear rồi add từng cái vì nếu schedules thay đổi (xoá/thêm)
-    // thì map sẽ còn thừa entries của schedule đã bị xoá
     _intakeStatus.clear();
     _medicineNames.clear();
     _medicineCategories.clear();
+    _medicineFormTypes.clear();
 
-    final today = DateTime.now();
+    final sel = _selectedDate;
     final startOfDay =
-        DateTime(today.year, today.month, today.day).millisecondsSinceEpoch;
+        DateTime(sel.year, sel.month, sel.day).millisecondsSinceEpoch;
     final endOfDay = startOfDay + const Duration(days: 1).inMilliseconds;
 
+    // FIX: snapshot _isFuture tại thời điểm load để tránh race condition
+    final isFutureSnapshot = _isFuture;
+
     for (final s in schedules) {
+      if (!_scheduleActiveOnDay(s, sel)) continue;
+
       final medRows = await db
           .query('medicines', where: 'id = ?', whereArgs: [s.medicineId]);
       if (medRows.isNotEmpty) {
         _medicineNames[s.id!] = medRows.first['name'] as String;
         _medicineCategories[s.id!] =
             medRows.first['category'] as String? ?? '';
+        _medicineFormTypes[s.id!] =
+            medRows.first['form_type'] as String? ?? '';
       }
 
       final intakeRows = await db.query(
@@ -119,19 +141,37 @@ class _DashboardBodyState extends State<_DashboardBody>
         where: 'schedule_id = ? AND scheduled_at >= ? AND scheduled_at < ?',
         whereArgs: [s.id, startOfDay, endOfDay],
       );
+
+      // FIX: dùng snapshot thay vì getter để đảm bảo nhất quán
       _intakeStatus[s.id!] = intakeRows.isNotEmpty
           ? intakeRows.first['status'] as String
-          : 'pending';
+          : (isFutureSnapshot ? 'upcoming' : 'pending');
     }
 
     if (mounted) setState(() {});
   }
 
+  bool _scheduleActiveOnDay(Schedule s, DateTime date) {
+    if (s.activeDays.isEmpty) return true;
+    final dayMap = {
+      1: '2',
+      2: '3',
+      3: '4',
+      4: '5',
+      5: '6',
+      6: '7',
+      7: 'CN'
+    };
+    final dayCode = dayMap[date.weekday] ?? '';
+    return s.activeDays.contains(dayCode);
+  }
+
   Future<void> _markAsTaken(Schedule schedule) async {
     final db = await AppDatabase.instance.database;
     final now = DateTime.now();
+    final sel = _selectedDate;
     final startOfDay =
-        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+        DateTime(sel.year, sel.month, sel.day).millisecondsSinceEpoch;
 
     final existing = await db.query(
       'intake_history',
@@ -143,7 +183,7 @@ class _DashboardBodyState extends State<_DashboardBody>
       await db.insert('intake_history', {
         'schedule_id': schedule.id,
         'medicine_id': schedule.medicineId,
-        'scheduled_at': _scheduledAtMs(schedule.time),
+        'scheduled_at': _scheduledAtMs(schedule.time, sel),
         'taken_at': now.millisecondsSinceEpoch,
         'status': 'taken',
       });
@@ -173,35 +213,50 @@ class _DashboardBodyState extends State<_DashboardBody>
         ]),
         backgroundColor: Colors.green.shade600,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         duration: const Duration(seconds: 2),
       ));
     }
   }
 
-  int _scheduledAtMs(String time) {
+  int _scheduledAtMs(String time, DateTime date) {
     final parts = time.split(':');
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day, int.parse(parts[0]),
+    return DateTime(date.year, date.month, date.day, int.parse(parts[0]),
         int.parse(parts[1]))
         .millisecondsSinceEpoch;
   }
 
+  // ── Helpers ────────────────────────────────────────────────────────────────
   double get _completionRate {
-    if (_intakeStatus.isEmpty) return 0;
-    final taken = _intakeStatus.values.where((s) => s == 'taken').length;
-    return taken / _intakeStatus.length;
+    final filtered =
+    _intakeStatus.values.where((s) => s != 'upcoming').toList();
+    if (filtered.isEmpty) return 0;
+    final taken = filtered.where((s) => s == 'taken').length;
+    return taken / filtered.length;
   }
 
   int get _takenCount =>
       _intakeStatus.values.where((s) => s == 'taken').length;
 
-  List<Schedule> _sorted(List<Schedule> list) {
-    final copy = List<Schedule>.from(list);
+  List<Schedule> _sortedAndFiltered(List<Schedule> list) {
+    final copy =
+    list.where((s) => _scheduleActiveOnDay(s, _selectedDate)).toList();
     copy.sort((a, b) => a.time.compareTo(b.time));
     return copy;
   }
 
+  void _onDaySelected(DateTime date) {
+    final normalized = DateTime(date.year, date.month, date.day);
+    final currentNormalized = DateTime(
+        _selectedDate.year, _selectedDate.month, _selectedDate.day);
+    if (normalized == currentNormalized) return;
+    setState(() => _selectedDate = normalized);
+    _animController.reset();
+    _loadIntakeAndNames().then((_) => _animController.forward());
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -211,6 +266,7 @@ class _DashboardBodyState extends State<_DashboardBody>
           return CustomScrollView(
             slivers: [
               _buildAppBar(),
+              SliverToBoxAdapter(child: _buildCalendarStrip()),
               if (vm.state == ScheduleViewState.loading)
                 const SliverFillRemaining(
                     child: Center(child: CircularProgressIndicator()))
@@ -227,12 +283,15 @@ class _DashboardBodyState extends State<_DashboardBody>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const SizedBox(height: 8),
-                          _buildGoalCard(),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 4),
+                          if (_isToday) ...[
+                            _buildGoalCard(),
+                            const SizedBox(height: 20),
+                          ] else
+                            _buildDateBanner(),
                           _buildTimelineSection(vm.schedules),
-                          const SizedBox(height: 24),
-                          _buildStatRow(),
+                          const SizedBox(height: 20),
+                          if (_isToday) _buildStatRow(),
                         ],
                       ),
                     ),
@@ -245,32 +304,26 @@ class _DashboardBodyState extends State<_DashboardBody>
     );
   }
 
+  // ── AppBar ─────────────────────────────────────────────────────────────────
   Widget _buildAppBar() {
-    final now = DateTime.now();
-    final weekdays = [
-      '', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật'
-    ];
-    final months = [
-      '', 'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
-      'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
-    ];
-    final dateStr = '${weekdays[now.weekday]}, ${now.day} ${months[now.month]}';
-
     return SliverAppBar(
       pinned: true,
-      expandedHeight: 100,
+      expandedHeight: 90,
       backgroundColor: const Color(0xFF137FEC),
       foregroundColor: Colors.white,
       automaticallyImplyLeading: false,
       actions: [
         IconButton(
           icon: const Icon(Icons.notifications_none_rounded, size: 26),
-          onPressed: () {},
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const NotificationScreen()),
+          ),
         ),
         const SizedBox(width: 8),
       ],
       flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+        titlePadding: const EdgeInsets.only(left: 20, bottom: 14),
         title: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -280,7 +333,7 @@ class _DashboardBodyState extends State<_DashboardBody>
                     fontWeight: FontWeight.bold,
                     fontSize: 18,
                     color: Colors.white)),
-            Text(dateStr,
+            Text(_headerDateStr(),
                 style: GoogleFonts.lexend(
                     fontSize: 11,
                     color: Colors.white70,
@@ -292,7 +345,11 @@ class _DashboardBodyState extends State<_DashboardBody>
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Color(0xFF1E88E5), Color(0xFF137FEC), Color(0xFF0D6EDC)],
+              colors: [
+                Color(0xFF1E88E5),
+                Color(0xFF137FEC),
+                Color(0xFF0D6EDC)
+              ],
             ),
           ),
         ),
@@ -300,25 +357,227 @@ class _DashboardBodyState extends State<_DashboardBody>
     );
   }
 
+  String _headerDateStr() {
+    final weekdays = [
+      '',
+      'Thứ Hai',
+      'Thứ Ba',
+      'Thứ Tư',
+      'Thứ Năm',
+      'Thứ Sáu',
+      'Thứ Bảy',
+      'Chủ Nhật'
+    ];
+    final months = [
+      '',
+      'Tháng 1',
+      'Tháng 2',
+      'Tháng 3',
+      'Tháng 4',
+      'Tháng 5',
+      'Tháng 6',
+      'Tháng 7',
+      'Tháng 8',
+      'Tháng 9',
+      'Tháng 10',
+      'Tháng 11',
+      'Tháng 12'
+    ];
+    final d = _selectedDate;
+    return '${weekdays[d.weekday]}, ${d.day} ${months[d.month]}';
+  }
+
+  // ── Calendar Strip ─────────────────────────────────────────────────────────
+  Widget _buildCalendarStrip() {
+    final today = DateTime.now();
+    final days = List.generate(
+        14,
+            (i) =>
+            today.subtract(const Duration(days: 3)).add(Duration(days: i)));
+
+    return Container(
+      color: const Color(0xFF137FEC),
+      padding: const EdgeInsets.only(bottom: 16, top: 4),
+      child: SizedBox(
+        height: 76,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: days.length,
+          itemBuilder: (context, i) {
+            final day = days[i];
+            final isToday = day.year == today.year &&
+                day.month == today.month &&
+                day.day == today.day;
+            final isSelected = day.year == _selectedDate.year &&
+                day.month == _selectedDate.month &&
+                day.day == _selectedDate.day;
+            final isPast =
+            day.isBefore(DateTime(today.year, today.month, today.day));
+
+            return GestureDetector(
+              onTap: () =>
+                  _onDaySelected(DateTime(day.year, day.month, day.day)),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.only(right: 8),
+                width: 52,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? Colors.white
+                      : Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: isToday && !isSelected
+                      ? Border.all(color: Colors.white, width: 1.5)
+                      : null,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _dayLabel(day.weekday),
+                      style: GoogleFonts.lexend(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: isSelected
+                            ? const Color(0xFF137FEC)
+                            : Colors.white70,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${day.day}',
+                      style: GoogleFonts.lexend(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isSelected
+                            ? const Color(0xFF137FEC)
+                            : isPast
+                            ? Colors.white54
+                            : Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: isToday ? 6 : 4,
+                      height: isToday ? 6 : 4,
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color(0xFF137FEC)
+                            : isToday
+                            ? Colors.white
+                            : Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  String _dayLabel(int weekday) {
+    const labels = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+    return labels[weekday];
+  }
+
+  // ── Date Banner ────────────────────────────────────────────────────────────
+  Widget _buildDateBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: _isFuture ? Colors.blue.shade50 : Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _isFuture ? Colors.blue.shade200 : Colors.orange.shade200,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _isFuture
+                ? Icons.event_available_rounded
+                : Icons.history_rounded,
+            color: _isFuture
+                ? Colors.blue.shade600
+                : Colors.orange.shade600,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _isFuture
+                  ? 'Xem trước lịch uống — không thể xác nhận'
+                  : 'Xem lại lịch uống ngày trước',
+              style: GoogleFonts.lexend(
+                fontSize: 13,
+                color: _isFuture
+                    ? Colors.blue.shade700
+                    : Colors.orange.shade700,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => _onDaySelected(DateTime(DateTime.now().year,
+                DateTime.now().month, DateTime.now().day)),
+            child: Container(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: _isFuture
+                    ? Colors.blue.shade100
+                    : Colors.orange.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Hôm nay',
+                style: GoogleFonts.lexend(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: _isFuture
+                      ? Colors.blue.shade700
+                      : Colors.orange.shade700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Goal Card ──────────────────────────────────────────────────────────────
   Widget _buildGoalCard() {
-    final total = _intakeStatus.length;
+    final total =
+        _intakeStatus.values.where((s) => s != 'upcoming').length;
     final taken = _takenCount;
     final String subtitle = _completionRate == 1.0
         ? '🎉 Hoàn thành xuất sắc!'
         : _completionRate >= 0.5
-        ? 'Sắp hoàn thành!'
-        : 'Hãy duy trì nhé!';
+        ? '💪 Sắp hoàn thành!'
+        : '⏰ Hãy duy trì nhé!';
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: Colors.white,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF1565C0), Color(0xFF137FEC)],
+        ),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-              color: const Color(0xFF137FEC).withOpacity(0.08),
+              color: const Color(0xFF137FEC).withOpacity(0.35),
               blurRadius: 20,
-              offset: const Offset(0, 6))
+              offset: const Offset(0, 8))
         ],
       ),
       child: Column(
@@ -331,90 +590,159 @@ class _DashboardBodyState extends State<_DashboardBody>
                   children: [
                     Text('MỤC TIÊU HÔM NAY',
                         style: GoogleFonts.lexend(
-                            color: const Color(0xFF137FEC),
+                            color: Colors.white60,
                             fontWeight: FontWeight.bold,
-                            fontSize: 12,
+                            fontSize: 11,
                             letterSpacing: 1.2)),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(subtitle,
                         style: GoogleFonts.lexend(
-                            fontSize: 22, fontWeight: FontWeight.bold)),
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white)),
                     const SizedBox(height: 4),
                     Text('$taken / $total lần uống',
                         style: GoogleFonts.lexend(
-                            fontSize: 14, color: Colors.grey.shade500)),
+                            fontSize: 13, color: Colors.white60)),
                   ],
                 ),
               ),
               CircularPercentIndicator(
-                radius: 48,
-                lineWidth: 10,
+                radius: 46,
+                lineWidth: 9,
                 percent: _completionRate.clamp(0.0, 1.0),
                 center: Text(
                   '${(_completionRate * 100).toInt()}%',
                   style: GoogleFonts.lexend(
                       fontWeight: FontWeight.bold,
-                      color: const Color(0xFF137FEC),
-                      fontSize: 16),
+                      color: Colors.white,
+                      fontSize: 15),
                 ),
                 progressColor: _completionRate == 1.0
-                    ? Colors.green
-                    : const Color(0xFF137FEC),
-                backgroundColor: const Color(0xFF137FEC).withOpacity(0.1),
+                    ? Colors.greenAccent
+                    : Colors.white,
+                backgroundColor: Colors.white.withOpacity(0.2),
                 circularStrokeCap: CircularStrokeCap.round,
                 animation: true,
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          LinearPercentIndicator(
-            lineHeight: 10,
-            percent: _completionRate.clamp(0.0, 1.0),
-            progressColor: _completionRate == 1.0
-                ? Colors.green
-                : const Color(0xFF137FEC),
-            backgroundColor: const Color(0xFF137FEC).withOpacity(0.1),
-            barRadius: const Radius.circular(10),
-            padding: EdgeInsets.zero,
-            animation: true,
+          const SizedBox(height: 18),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: LinearProgressIndicator(
+              value: _completionRate.clamp(0.0, 1.0),
+              minHeight: 8,
+              backgroundColor: Colors.white.withOpacity(0.2),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                _completionRate == 1.0
+                    ? Colors.greenAccent
+                    : Colors.white,
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
+  // ── Timeline Section ───────────────────────────────────────────────────────
   Widget _buildTimelineSection(List<Schedule> schedules) {
-    final sorted = _sorted(schedules);
+    final sorted = _sortedAndFiltered(schedules);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Thời gian biểu',
-            style: GoogleFonts.lexend(
-                fontSize: 20, fontWeight: FontWeight.bold)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Thời gian biểu',
+                style: GoogleFonts.lexend(
+                    fontSize: 18, fontWeight: FontWeight.bold)),
+            if (!_isToday && !_isFuture) _buildMissedBadge(sorted),
+          ],
+        ),
         const SizedBox(height: 14),
         if (sorted.isEmpty)
-          _EmptySchedule()
+          _EmptySchedule(isFuture: _isFuture)
         else
-          ...sorted.asMap().entries.map((e) => _TimelineItem(
-            schedule: e.value,
-            isLast: e.key == sorted.length - 1,
-            status: _intakeStatus[e.value.id] ?? 'pending',
-            medicineName: _medicineNames[e.value.id] ??
-                'Thuốc #${e.value.medicineId}',
-            medicineCategory: _medicineCategories[e.value.id] ?? '',
-            onTaken: () => _markAsTaken(e.value),
-            onEdit: () => showEditScheduleSheet(
-              context,
+          ...sorted.asMap().entries.map((e) {
+            final sid = e.value.id!;
+            final status = _intakeStatus[sid] ?? (_isFuture ? 'upcoming' : 'pending');
+            return _TimelineItem(
+              // FIX: ValueKey bao gồm cả isFuture để rebuild đúng khi đổi ngày
+              key: ValueKey('$sid-$status-$_isFuture'),
               schedule: e.value,
-              medicineName: _medicineNames[e.value.id] ??
-                  'Thuốc #${e.value.medicineId}',
-              onUpdated: _init,
-            ),
-          )),
+              isLast: e.key == sorted.length - 1,
+              status: status,
+              medicineName:
+              _medicineNames[sid] ?? 'Thuốc #${e.value.medicineId}',
+              medicineCategory: _medicineCategories[sid] ?? '',
+              medicineFormType: _medicineFormTypes[sid] ?? '',
+              isToday: _isToday,
+              isFuture: _isFuture,
+              onTaken: () => _markAsTaken(e.value),
+              onEdit: _isToday
+                  ? () => showEditScheduleSheet(
+                context,
+                schedule: e.value,
+                medicineName: _medicineNames[sid] ??
+                    'Thuốc #${e.value.medicineId}',
+                intakeStatus: _intakeStatus[sid] ?? 'pending',
+                formType: _medicineFormTypes[sid],
+                onUpdated: _init,
+              )
+                  : null,
+            );
+          }),
       ],
     );
   }
 
+  Widget _buildMissedBadge(List<Schedule> sorted) {
+    final missed =
+        sorted.where((s) => (_intakeStatus[s.id] ?? '') == 'pending').length;
+    if (missed == 0) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red.shade200),
+      ),
+      child: Text(
+        '$missed bỏ lỡ',
+        style: GoogleFonts.lexend(
+            fontSize: 12,
+            color: Colors.red.shade600,
+            fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  // ── Dose unit helper ──────────────────────────────────────────────────────
+  static String doseUnitFromFormType(String? formType) {
+    switch (formType) {
+      case 'vien_nang':
+      case 'vien_nen':
+      case 'vien_sui':
+        return 'viên';
+      case 'siro':
+      case 'dung_dich':
+      case 'nuoc':
+        return 'ml';
+      case 'tuyt':
+      case 'kem':
+        return 'tuýp';
+      case 'goi':
+        return 'gói';
+      case 'ong':
+        return 'ống';
+      default:
+        return 'lần';
+    }
+  }
+
+  // ── Stat Row ───────────────────────────────────────────────────────────────
   Widget _buildStatRow() {
     final pending =
         _intakeStatus.values.where((s) => s == 'pending').length;
@@ -429,9 +757,9 @@ class _DashboardBodyState extends State<_DashboardBody>
         const SizedBox(width: 12),
         _StatCard(
           icon: Icons.pending_actions_rounded,
-          color: Colors.blue,
+          color: const Color(0xFF137FEC),
           value: '$pending Lần',
-          label: 'Còn lại hôm nay',
+          label: 'Chưa uống hôm nay',
         ),
       ],
     );
@@ -439,7 +767,7 @@ class _DashboardBodyState extends State<_DashboardBody>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Timeline Item — 4 trạng thái: ✅ taken | 🔵 current | 🟠 overdue | ⚪ upcoming
+//  Timeline Item — hỗ trợ 3 chế độ: today / future / past
 // ─────────────────────────────────────────────────────────────────────────────
 class _TimelineItem extends StatefulWidget {
   final Schedule schedule;
@@ -447,17 +775,24 @@ class _TimelineItem extends StatefulWidget {
   final String status;
   final String medicineName;
   final String medicineCategory;
+  final String medicineFormType;
+  final bool isToday;
+  final bool isFuture;
   final VoidCallback onTaken;
-  final VoidCallback onEdit; // ← thêm
+  final VoidCallback? onEdit;
 
   const _TimelineItem({
+    super.key,
     required this.schedule,
     required this.isLast,
     required this.status,
     required this.medicineName,
     required this.medicineCategory,
+    required this.medicineFormType,
+    required this.isToday,
+    required this.isFuture,
     required this.onTaken,
-    required this.onEdit, // ← thêm
+    this.onEdit,
   });
 
   @override
@@ -473,7 +808,20 @@ class _TimelineItemState extends State<_TimelineItem>
     super.initState();
     _ctrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 300));
+    // Set ngay giá trị đúng khi khởi tạo
     if (widget.status == 'taken') _ctrl.value = 1.0;
+  }
+
+  @override
+  void didUpdateWidget(covariant _TimelineItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.status != widget.status) {
+      if (widget.status == 'taken') {
+        _ctrl.forward();
+      } else {
+        _ctrl.reverse();
+      }
+    }
   }
 
   @override
@@ -482,31 +830,35 @@ class _TimelineItemState extends State<_TimelineItem>
     super.dispose();
   }
 
-  // ── Số phút chênh lệch: dương = đã qua, âm = chưa đến ──
   int get _diffMinutes {
     final now = TimeOfDay.now();
     final parts = widget.schedule.time.split(':');
-    final h = int.parse(parts[0]);
-    final m = int.parse(parts[1]);
-    return (now.hour * 60 + now.minute) - (h * 60 + m);
+    return (now.hour * 60 + now.minute) -
+        (int.parse(parts[0]) * 60 + int.parse(parts[1]));
   }
 
-  // ── 4 getter trạng thái ───────────────────────────────────
   bool get _isTaken => widget.status == 'taken';
 
-  /// Trong vòng 30 phút trước → 60 phút sau giờ nhắc
   bool get _isCurrent =>
-      !_isTaken && _diffMinutes >= -30 && _diffMinutes <= 60;
+      widget.isToday && !_isTaken && _diffMinutes >= -30 && _diffMinutes <= 60;
 
-  /// Đã quá hơn 60 phút mà chưa uống
-  bool get _isOverdue => !_isTaken && _diffMinutes > 60;
+  bool get _isOverdue =>
+      widget.isToday && !_isTaken && _diffMinutes > 60;
 
-  // ── Màu dot theo trạng thái ───────────────────────────────
+  bool get _isMissed =>
+      !widget.isToday && !widget.isFuture && widget.status == 'pending';
+
+  // FIX: thêm check status == 'upcoming' để bắt đúng trạng thái tương lai
+  bool get _isUpcoming =>
+      widget.isFuture || widget.status == 'upcoming';
+
   Color get _dotColor {
     if (_isTaken) return Colors.green;
     if (_isCurrent) return const Color(0xFF137FEC);
     if (_isOverdue) return Colors.orange;
-    return Colors.grey.shade400; // upcoming
+    if (_isMissed) return Colors.red.shade300;
+    if (_isUpcoming) return Colors.blue.shade200; // FIX: dùng _isUpcoming
+    return Colors.grey.shade400;
   }
 
   @override
@@ -515,13 +867,14 @@ class _TimelineItemState extends State<_TimelineItem>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Timeline dot + line ──
+          // ── Dot + line ──
           Column(
             children: [
+              // FIX: chỉ dùng ScaleTransition khi taken, còn lại hiện scale 1.0 bình thường
               ScaleTransition(
                 scale: _isTaken
                     ? CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut)
-                    : const AlwaysStoppedAnimation(1),
+                    : const AlwaysStoppedAnimation(1.0),
                 child: Container(
                   width: 44,
                   height: 44,
@@ -533,15 +886,7 @@ class _TimelineItemState extends State<_TimelineItem>
                       width: (_isCurrent || _isOverdue) ? 2 : 1.5,
                     ),
                   ),
-                  child: Icon(
-                    _isTaken
-                        ? Icons.check_rounded
-                        : _isOverdue
-                        ? Icons.warning_amber_rounded   // icon cảnh báo cho overdue
-                        : Icons.access_time_rounded,
-                    color: _dotColor,
-                    size: 20,
-                  ),
+                  child: Icon(_iconForState(), color: _dotColor, size: 20),
                 ),
               ),
               if (!widget.isLast)
@@ -557,20 +902,27 @@ class _TimelineItemState extends State<_TimelineItem>
             ],
           ),
           const SizedBox(width: 14),
-          // ── Card — tap để sửa ──
+          // ── Card ──
           Expanded(
             child: GestureDetector(
               onTap: widget.onEdit,
               child: Container(
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: _isMissed
+                      ? Colors.red.shade50
+                      : _isUpcoming // FIX: dùng _isUpcoming
+                      ? Colors.blue.shade50
+                      : Colors.white,
                   borderRadius: BorderRadius.circular(20),
-                  // Border màu cam khi overdue, màu xanh khi current
                   border: _isCurrent
-                      ? Border.all(color: const Color(0xFF137FEC), width: 2)
+                      ? Border.all(
+                      color: const Color(0xFF137FEC), width: 2)
                       : _isOverdue
                       ? Border.all(color: Colors.orange, width: 2)
+                      : _isMissed
+                      ? Border.all(
+                      color: Colors.red.shade200, width: 1.5)
                       : Border.all(color: Colors.grey.shade100),
                   boxShadow: [
                     BoxShadow(
@@ -586,7 +938,7 @@ class _TimelineItemState extends State<_TimelineItem>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header: tên + giờ
+                      // Header
                       Row(
                         children: [
                           Expanded(
@@ -595,8 +947,11 @@ class _TimelineItemState extends State<_TimelineItem>
                               children: [
                                 Text(widget.medicineName,
                                     style: GoogleFonts.lexend(
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.bold)),
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: _isMissed
+                                            ? Colors.red.shade700
+                                            : null)),
                                 if (widget.medicineCategory.isNotEmpty)
                                   Text(widget.medicineCategory,
                                       style: GoogleFonts.lexend(
@@ -625,10 +980,10 @@ class _TimelineItemState extends State<_TimelineItem>
                       Row(
                         children: [
                           Icon(Icons.medication_rounded,
-                              size: 16, color: Colors.grey.shade400),
+                              size: 15, color: Colors.grey.shade400),
                           const SizedBox(width: 6),
                           Text(
-                            '${widget.schedule.doseQuantity % 1 == 0 ? widget.schedule.doseQuantity.toInt() : widget.schedule.doseQuantity} viên',
+                            '${widget.schedule.doseQuantity % 1 == 0 ? widget.schedule.doseQuantity.toInt() : widget.schedule.doseQuantity} ${_DashboardBodyState.doseUnitFromFormType(widget.medicineFormType)}',
                             style: GoogleFonts.lexend(
                                 fontSize: 13, color: Colors.grey.shade500),
                           ),
@@ -636,8 +991,8 @@ class _TimelineItemState extends State<_TimelineItem>
                               widget.schedule.label!.isNotEmpty) ...[
                             const SizedBox(width: 6),
                             Text('•',
-                                style:
-                                TextStyle(color: Colors.grey.shade400)),
+                                style: TextStyle(
+                                    color: Colors.grey.shade400)),
                             const SizedBox(width: 6),
                             Text(widget.schedule.label!,
                                 style: GoogleFonts.lexend(
@@ -646,116 +1001,162 @@ class _TimelineItemState extends State<_TimelineItem>
                           ],
                         ],
                       ),
-
-                      // ── Action theo từng trạng thái ──────────────────────
-
-                      if (_isTaken) ...[
-                        // ✅ Đã uống
-                        const SizedBox(height: 12),
-                        Row(children: [
-                          const Icon(Icons.check_circle_rounded,
-                              color: Colors.green, size: 18),
-                          const SizedBox(width: 6),
-                          Text('Đã uống',
-                              style: GoogleFonts.lexend(
-                                  color: Colors.green,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14)),
-                        ]),
-
-                      ] else if (_isCurrent) ...[
-                        // 🔵 Đến giờ uống
-                        const SizedBox(height: 14),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 46,
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              _ctrl.forward();
-                              widget.onTaken();
-                            },
-                            icon: const Icon(Icons.check_rounded, size: 18),
-                            label: Text('XÁC NHẬN ĐÃ UỐNG',
-                                style: GoogleFonts.lexend(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF137FEC),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14)),
-                              elevation: 0,
-                            ),
-                          ),
-                        ),
-
-                      ] else if (_isOverdue) ...[
-                        // 🟠 Đã quá giờ — vẫn cho uống muộn
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Icon(Icons.warning_amber_rounded,
-                                color: Colors.orange.shade700, size: 16),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                'Đã quá giờ ${_formatOverdue(_diffMinutes)}',
-                                style: GoogleFonts.lexend(
-                                    fontSize: 13,
-                                    color: Colors.orange.shade700,
-                                    fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                _ctrl.forward();
-                                widget.onTaken();
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 7),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                      color: Colors.orange.shade300),
-                                ),
-                                child: Text(
-                                  'Uống muộn',
-                                  style: GoogleFonts.lexend(
-                                      fontSize: 12,
-                                      color: Colors.orange.shade700,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                      ] else ...[
-                        // ⚪ Chưa đến giờ (diff < -30 phút)
-                        const SizedBox(height: 10),
-                        Row(children: [
-                          Icon(Icons.schedule_rounded,
-                              size: 14, color: Colors.grey.shade400),
-                          const SizedBox(width: 6),
-                          Text('Chưa đến giờ',
-                              style: GoogleFonts.lexend(
-                                  fontSize: 13, color: Colors.grey.shade400)),
-                        ]),
-                      ],
+                      _buildAction(),
                     ],
                   ),
                 ),
-              ), // ← đóng Container card
-            ), // ← đóng GestureDetector
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// Format số phút quá giờ: "42 phút" | "1h" | "1h30p"
+  Widget _buildAction() {
+    // ✅ Đã uống
+    if (_isTaken) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Row(children: [
+          const Icon(Icons.check_circle_rounded,
+              color: Colors.green, size: 16),
+          const SizedBox(width: 6),
+          Text('Đã uống',
+              style: GoogleFonts.lexend(
+                  color: Colors.green,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13)),
+        ]),
+      );
+    }
+
+    // 🔵 Đến giờ uống (hôm nay)
+    if (_isCurrent) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: SizedBox(
+          width: double.infinity,
+          height: 44,
+          child: ElevatedButton.icon(
+            onPressed: () {
+              _ctrl.forward();
+              widget.onTaken();
+            },
+            icon: const Icon(Icons.check_rounded, size: 17),
+            label: Text('XÁC NHẬN ĐÃ UỐNG',
+                style: GoogleFonts.lexend(
+                    fontWeight: FontWeight.bold, fontSize: 13)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF137FEC),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              elevation: 0,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 🟠 Quá giờ (hôm nay)
+    if (_isOverdue) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: Colors.orange.shade700, size: 15),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Đã quá ${_formatOverdue(_diffMinutes)}',
+                  style: GoogleFonts.lexend(
+                      fontSize: 13,
+                      color: Colors.orange.shade700,
+                      fontWeight: FontWeight.w600)),
+            ),
+            GestureDetector(
+              onTap: () {
+                _ctrl.forward();
+                widget.onTaken();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: Colors.orange.shade300),
+                ),
+                child: Text('Uống muộn',
+                    style: GoogleFonts.lexend(
+                        fontSize: 12,
+                        color: Colors.orange.shade700,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 🔴 Bỏ lỡ (ngày trước)
+    if (_isMissed) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Row(children: [
+          Icon(Icons.cancel_rounded,
+              color: Colors.red.shade300, size: 16),
+          const SizedBox(width: 6),
+          Text('Đã bỏ lỡ',
+              style: GoogleFonts.lexend(
+                  color: Colors.red.shade400,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13)),
+        ]),
+      );
+    }
+
+    // 🔮 Tương lai — FIX: check _isUpcoming thay vì chỉ widget.isFuture
+    if (_isUpcoming) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Row(children: [
+          Icon(Icons.event_available_rounded,
+              color: Colors.blue.shade300, size: 16),
+          const SizedBox(width: 6),
+          Text('Đã lên lịch',
+              style: GoogleFonts.lexend(
+                  color: Colors.blue.shade400,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 13)),
+        ]),
+      );
+    }
+
+    // ⚪ Chưa đến giờ (hôm nay)
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(children: [
+        Icon(Icons.schedule_rounded,
+            size: 14, color: Colors.grey.shade400),
+        const SizedBox(width: 6),
+        Text('Chưa đến giờ',
+            style: GoogleFonts.lexend(
+                fontSize: 13, color: Colors.grey.shade400)),
+      ]),
+    );
+  }
+
+  // FIX: _iconForState dùng _isUpcoming để bắt đúng cả 2 trường hợp
+  IconData _iconForState() {
+    if (_isTaken) return Icons.check_rounded;
+    if (_isOverdue) return Icons.warning_amber_rounded;
+    if (_isMissed) return Icons.close_rounded;
+    if (_isUpcoming) return Icons.event_rounded; // FIX: dùng _isUpcoming
+    return Icons.access_time_rounded;
+  }
+
   String _formatOverdue(int diff) {
     if (diff < 60) return '$diff phút';
     final h = diff ~/ 60;
@@ -800,15 +1201,17 @@ class _StatCard extends StatelessWidget {
                 color: color.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: color, size: 22),
+              child: Icon(icon, color: color, size: 20),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Text(value,
                 style: GoogleFonts.lexend(
-                    fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: color)),
             Text(label,
                 style: GoogleFonts.lexend(
-                    fontSize: 12, color: Colors.grey.shade500)),
+                    fontSize: 11, color: Colors.grey.shade500)),
           ],
         ),
       ),
@@ -817,6 +1220,9 @@ class _StatCard extends StatelessWidget {
 }
 
 class _EmptySchedule extends StatelessWidget {
+  final bool isFuture;
+  const _EmptySchedule({this.isFuture = false});
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -827,11 +1233,19 @@ class _EmptySchedule extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Icon(Icons.alarm_off_rounded, size: 56, color: Colors.grey.shade300),
+          Icon(
+            isFuture
+                ? Icons.event_available_rounded
+                : Icons.alarm_off_rounded,
+            size: 52,
+            color: Colors.grey.shade300,
+          ),
           const SizedBox(height: 12),
-          Text('Hôm nay không có lịch nhắc',
-              style: GoogleFonts.lexend(
-                  color: Colors.grey.shade400, fontSize: 15)),
+          Text(
+            'Không có lịch uống ngày này',
+            style: GoogleFonts.lexend(
+                color: Colors.grey.shade400, fontSize: 14),
+          ),
         ],
       ),
     );
