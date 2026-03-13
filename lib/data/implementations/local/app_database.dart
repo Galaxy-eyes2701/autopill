@@ -20,11 +20,12 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
   }
 
@@ -57,6 +58,8 @@ class AppDatabase {
       stock_threshold INTEGER DEFAULT 0,
       status TEXT DEFAULT 'active',
       instructions TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   ''');
@@ -102,6 +105,18 @@ class AppDatabase {
 
     // 🔥 SEED DATA ngay sau khi tạo bảng
     await seedData(db);
+  }
+
+  Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Thêm created_at và updated_at cho medicines table
+      await db.execute('''
+        ALTER TABLE medicines ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      ''');
+      await db.execute('''
+        ALTER TABLE medicines ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      ''');
+    }
   }
 
   // ================= CHANGE PASSWORD =================

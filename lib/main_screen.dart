@@ -28,7 +28,7 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _screens = [
     const DashboardScreen(), // Trang chủ (Lịch trình)
     const HistoryScreen(), // Lịch sử
-    const InventoryScreen(), // Tủ thuốc
+    const InventoryScreen(),
     const SettingsScreen(), // Cài đặt
   ];
 
@@ -46,16 +46,22 @@ class _MainScreenState extends State<MainScreen> {
 
       // Nút FAB (Dấu cộng) ở giữa
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
+        onPressed: () async {
           // Kích hoạt logic điều hướng theo tab
           if (_selectedIndex == 2) {
             // Nếu đang ở màn Tủ thuốc (index 2) -> Điều hướng đến màn Create Medicine
-            Navigator.push(
+            final result = await Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => const AddMedicineStockScreen(),
               ),
             );
+            
+            // Nếu thêm thuốc thành công, refresh inventory screen
+            if (result == true && mounted) {
+              // Trigger rebuild của InventoryScreen bằng cách setState
+              setState(() {});
+            }
           } else {
             // Đang ở giao diện bình thường khác -> Điều hướng đến màn Thêm Liều Thuốc
             Navigator.push(
