@@ -33,6 +33,11 @@ void main() async {
   final loginViewModel    = buildLogin();
   final medicineViewModel = buildMedicine();
 
+  // Restore currentUser nếu đã đăng nhập từ trước
+  if (isLoggedIn) {
+    await loginViewModel.checkSession();
+  }
+
   runApp(
     MultiProvider(
       providers: [
