@@ -110,10 +110,10 @@ class AppDatabase {
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute('''
-        ALTER TABLE medicines ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        ALTER TABLE medicines ADD COLUMN created_at TEXT 
       ''');
       await db.execute('''
-        ALTER TABLE medicines ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        ALTER TABLE medicines ADD COLUMN updated_at TEXT 
       ''');
     }
   }
