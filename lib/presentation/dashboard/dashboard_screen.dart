@@ -42,7 +42,7 @@ class _DashboardBodyState extends State<_DashboardBody>
   final Map<int, String> _medicineNames = {};
   final Map<int, String> _medicineCategories = {};
   final Map<int, String> _medicineFormTypes = {};
-  final Map<int, String> _medicineUnits = {}; // ← dùng dosage_unit từ DB
+  final Map<int, String> _medicineUnits = {};
   int _userId = 0;
 
   /// Ngày đang xem (mặc định hôm nay)
@@ -136,7 +136,6 @@ class _DashboardBodyState extends State<_DashboardBody>
             medRows.first['category'] as String? ?? '';
         _medicineFormTypes[s.id!] =
             medRows.first['form_type'] as String? ?? '';
-        // ← Lấy thẳng dosage_unit từ DB — luôn đúng vì AddMedicine tự fill
         _medicineUnits[s.id!] =
             medRows.first['dosage_unit'] as String? ?? 'viên';
       }
@@ -205,14 +204,15 @@ class _DashboardBodyState extends State<_DashboardBody>
       [schedule.doseQuantity.toInt(), schedule.medicineId],
     );
 
-    // Patch stock vào MedicineViewmodel để InventoryScreen cập nhật realtime
     final updated = await db.query('medicines',
         columns: ['stock_current'],
         where: 'id = ?',
         whereArgs: [schedule.medicineId]);
     if (updated.isNotEmpty && context.mounted) {
       final newStock = updated.first['stock_current'] as int;
-      context.read<MedicineViewmodel>().patchStock(schedule.medicineId, newStock);
+      context
+          .read<MedicineViewmodel>()
+          .patchStock(schedule.medicineId, newStock);
     }
 
     setState(() => _intakeStatus[schedule.id!] = 'taken');
@@ -305,7 +305,8 @@ class _DashboardBodyState extends State<_DashboardBody>
                             _buildDateBanner(),
                           _buildTimelineSection(vm.schedules),
                           const SizedBox(height: 20),
-                          if (_isToday) _buildStatRow(),
+                          // ── Streak Card (chỉ hiện khi đang xem hôm nay) ──
+                          if (_isToday) _StreakCard(userId: _userId),
                         ],
                       ),
                     ),
@@ -518,9 +519,8 @@ class _DashboardBodyState extends State<_DashboardBody>
             _isFuture
                 ? Icons.event_available_rounded
                 : Icons.history_rounded,
-            color: _isFuture
-                ? Colors.blue.shade600
-                : Colors.orange.shade600,
+            color:
+            _isFuture ? Colors.blue.shade600 : Colors.orange.shade600,
             size: 20,
           ),
           const SizedBox(width: 10),
@@ -694,7 +694,7 @@ class _DashboardBodyState extends State<_DashboardBody>
               _medicineNames[sid] ?? 'Thuốc #${e.value.medicineId}',
               medicineCategory: _medicineCategories[sid] ?? '',
               medicineFormType: _medicineFormTypes[sid] ?? '',
-              medicineUnit: _medicineUnits[sid] ?? 'viên', // ← dosage_unit
+              medicineUnit: _medicineUnits[sid] ?? 'viên',
               isToday: _isToday,
               isFuture: _isFuture,
               onTaken: () => _markAsTaken(e.value),
@@ -735,27 +735,160 @@ class _DashboardBodyState extends State<_DashboardBody>
       ),
     );
   }
+}
 
-  // ── Stat Row ───────────────────────────────────────────────────────────────
-  Widget _buildStatRow() {
-    final pending =
-        _intakeStatus.values.where((s) => s == 'pending').length;
-    return Row(
-      children: [
-        _StatCard(
-          icon: Icons.check_circle_rounded,
-          color: Colors.green,
-          value: '$_takenCount Lần',
-          label: 'Đã uống hôm nay',
-        ),
-        const SizedBox(width: 12),
-        _StatCard(
-          icon: Icons.pending_actions_rounded,
-          color: const Color(0xFF137FEC),
-          value: '$pending Lần',
-          label: 'Chưa uống hôm nay',
-        ),
-      ],
+// ─────────────────────────────────────────────────────────────────────────────
+//  Streak Card
+// ─────────────────────────────────────────────────────────────────────────────
+class _StreakCard extends StatefulWidget {
+  final int userId;
+  const _StreakCard({required this.userId});
+
+  @override
+  State<_StreakCard> createState() => _StreakCardState();
+}
+
+class _StreakCardState extends State<_StreakCard> {
+  int _streak = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _calcStreak();
+  }
+
+  Future<void> _calcStreak() async {
+    final db = await AppDatabase.instance.database;
+    int streak = 0;
+
+    // Lùi từng ngày từ hôm qua, kiểm tra có ít nhất 1 lần 'taken' không
+    DateTime day = DateTime.now().subtract(const Duration(days: 1));
+    for (int i = 0; i < 365; i++) {
+      final start =
+          DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
+      final end = start + const Duration(days: 1).inMilliseconds;
+
+      final rows = await db.rawQuery('''
+        SELECT ih.id FROM intake_history ih
+        JOIN schedules s ON s.id = ih.schedule_id
+        JOIN medicines m ON m.id = ih.medicine_id
+        WHERE m.user_id = ?
+          AND ih.scheduled_at >= ?
+          AND ih.scheduled_at < ?
+          AND ih.status = 'taken'
+        LIMIT 1
+      ''', [widget.userId, start, end]);
+
+      if (rows.isEmpty) break; // Chuỗi bị đứt
+      streak++;
+      day = day.subtract(const Duration(days: 1));
+    }
+
+    // Cộng thêm hôm nay nếu đã uống ít nhất 1 lần
+    final now = DateTime.now();
+    final todayStart =
+        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+    final todayEnd = todayStart + const Duration(days: 1).inMilliseconds;
+    final todayRows = await db.rawQuery('''
+      SELECT ih.id FROM intake_history ih
+      JOIN medicines m ON m.id = ih.medicine_id
+      WHERE m.user_id = ?
+        AND ih.scheduled_at >= ?
+        AND ih.scheduled_at < ?
+        AND ih.status = 'taken'
+      LIMIT 1
+    ''', [widget.userId, todayStart, todayEnd]);
+
+    if (todayRows.isNotEmpty) streak++;
+
+    if (mounted) setState(() {
+      _streak = streak;
+      _loading = false;
+    });
+  }
+
+  String get _message {
+    if (_streak == 0) return 'Hãy bắt đầu chuỗi hôm nay! 💪';
+    if (_streak < 7) return 'Tiếp tục duy trì nhé! 🔥';
+    if (_streak < 30) return 'Thói quen tuyệt vời! ⭐';
+    return 'Kỷ lục xuất sắc! 🏆';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // ── Icon ngọn lửa ──
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.orange.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text('🔥', style: TextStyle(fontSize: 24)),
+          ),
+          const SizedBox(width: 16),
+          // ── Text ──
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$_streak ngày liên tiếp',
+                  style: GoogleFonts.lexend(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange.shade700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _message,
+                  style: GoogleFonts.lexend(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // ── Badge số ngày ──
+          Container(
+            padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Text(
+              '$_streak 🔥',
+              style: GoogleFonts.lexend(
+                fontWeight: FontWeight.bold,
+                color: Colors.orange.shade700,
+                fontSize: 15,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -770,7 +903,7 @@ class _TimelineItem extends StatefulWidget {
   final String medicineName;
   final String medicineCategory;
   final String medicineFormType;
-  final String medicineUnit; // ← dosage_unit từ DB
+  final String medicineUnit;
   final bool isToday;
   final bool isFuture;
   final VoidCallback onTaken;
@@ -862,7 +995,8 @@ class _TimelineItemState extends State<_TimelineItem>
             children: [
               ScaleTransition(
                 scale: _isTaken
-                    ? CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut)
+                    ? CurvedAnimation(
+                    parent: _ctrl, curve: Curves.elasticOut)
                     : const AlwaysStoppedAnimation(1.0),
                 child: Container(
                   width: 44,
@@ -965,7 +1099,6 @@ class _TimelineItemState extends State<_TimelineItem>
                         ],
                       ),
                       const SizedBox(height: 8),
-                      // Dose info — dùng widget.medicineUnit thay vì map form_type
                       Row(
                         children: [
                           Icon(Icons.medication_rounded,
@@ -1149,59 +1282,8 @@ class _TimelineItemState extends State<_TimelineItem>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String value, label;
-
-  const _StatCard(
-      {required this.icon,
-        required this.color,
-        required this.value,
-        required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 4))
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: color, size: 20),
-            ),
-            const SizedBox(height: 10),
-            Text(value,
-                style: GoogleFonts.lexend(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: color)),
-            Text(label,
-                style: GoogleFonts.lexend(
-                    fontSize: 11, color: Colors.grey.shade500)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
+//  Supporting widgets
+// ─────────────────────────────────────────────────────────────────────────────
 class _EmptySchedule extends StatelessWidget {
   final bool isFuture;
   const _EmptySchedule({this.isFuture = false});
