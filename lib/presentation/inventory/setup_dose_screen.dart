@@ -253,15 +253,21 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
       }
     }
 
-    // ── Bước 3: lưu ──────────────────────────────────────────────────────
+    // ── Bước 3: lưu + lên lịch thông báo ────────────────────────────────
     bool allOk = true;
     for (final entry in _selectedMedicines.entries) {
+      // Lấy thông tin thuốc để truyền vào notification
+      final medicine = _medicines.firstWhere((m) => m.id == entry.key);
+
       final ok = await vm.addSchedule(
-        medicineId: entry.key,
-        time: _timeString,
-        label: _labelController.text.trim(),
+        medicineId:   entry.key,
+        time:         _timeString,
+        label:        _labelController.text.trim(),
         doseQuantity: entry.value.toDouble(),
-        activeDays: _activeDays,
+        activeDays:   _activeDays,
+        // ── Thêm 2 tham số mới cho NotificationService ──
+        medicineName: medicine.name,
+        dosageUnit:   doseUnitFromFormType(medicine.formType),
       );
       if (!ok) allOk = false;
     }
