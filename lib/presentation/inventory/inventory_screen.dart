@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:autopill/viewmodels/medicine/medicine_viewmodel.dart';
 import 'package:autopill/data/dtos/medicines/medicine_response_dto.dart';
 import 'package:autopill/presentation/inventory/edit_medicine_screen.dart';
@@ -57,11 +58,24 @@ class InventoryScreen extends StatefulWidget {
 }
 
 class _InventoryScreenState extends State<InventoryScreen> {
+  int _userId = 0;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(
-            (_) => context.read<MedicineViewmodel>().loadMedicines());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      _userId = prefs.getInt('userId') ?? 0;
+      if (mounted) {
+        context.read<MedicineViewmodel>().loadMedicinesByUserId(_userId);
+      }
+    });
+  }
+
+  Future<void> _reload() async {
+    if (_userId != 0) {
+      await context.read<MedicineViewmodel>().loadMedicinesByUserId(_userId);
+    }
   }
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -71,7 +85,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       context,
       MaterialPageRoute(builder: (_) => EditMedicineScreen(medicine: m)),
     );
-    if (ok == true && mounted) context.read<MedicineViewmodel>().loadMedicines();
+    if (ok == true && mounted) await _reload();
   }
 
   Future<void> _archive(MedicineResponseDto m) async {
@@ -135,7 +149,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
             Navigator.pop(ctx);
             if (ok) {
               _snack('Đã nhập thêm $qty ${m.dosageUnit ?? 'viên'} cho "${m.name}"', _kSuccess);
-              ctx.read<MedicineViewmodel>().loadMedicines();
+              await _reload();
             } else {
               _snack('Cập nhật thất bại, thử lại', _kDanger);
             }
@@ -173,7 +187,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     return RefreshIndicator(
       color: _kPrimary,
-      onRefresh: () => vm.loadMedicines(),
+      onRefresh: () => _reload(),
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [

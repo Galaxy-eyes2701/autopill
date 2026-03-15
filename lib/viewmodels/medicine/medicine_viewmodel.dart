@@ -11,42 +11,38 @@ class MedicineViewmodel extends ChangeNotifier {
   List<MedicineResponseDto> _medicines = [];
   bool _isLoading = false;
   String? _error;
+  int _currentUserId = 0;
 
   List<MedicineResponseDto> get medicines => _medicines;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  // Lấy tất cả thuốc
-  Future<void> loadMedicines() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-    
-    try {
-      _medicines = await _repository.getAll();
-    } catch (e) {
-      _error = 'Không thể tải danh sách thuốc: $e';
-    }
-    
-    _isLoading = false;
-    notifyListeners();
-  }
-
-  // Lấy thuốc theo user ID
+  // Lấy thuốc theo user ID (dùng chính)
   Future<void> loadMedicinesByUserId(int userId) async {
+    _currentUserId = userId;
     _isLoading = true;
     _error = null;
     notifyListeners();
-    
+
     try {
       _medicines = await _repository.getByUserId(userId);
     } catch (e) {
       _error = 'Không thể tải danh sách thuốc: $e';
     }
-    
+
     _isLoading = false;
     notifyListeners();
   }
+
+  // Reload lại với userId đã lưu
+  Future<void> _reload() async {
+    if (_currentUserId != 0) {
+      await loadMedicinesByUserId(_currentUserId);
+    }
+  }
+
+  // Giữ lại để tương thích, nhưng không nên dùng trực tiếp
+  Future<void> loadMedicines() => _reload();
 
   // Lấy thuốc cảnh báo (sắp hết)
   Future<List<MedicineResponseDto>> getWarningMedicines(int userId) async {
@@ -74,7 +70,7 @@ class MedicineViewmodel extends ChangeNotifier {
     try {
       final result = await _repository.create(request);
       if (result) {
-        await loadMedicines();
+        await _reload();
       }
       return result;
     } catch (e) {
@@ -89,7 +85,7 @@ class MedicineViewmodel extends ChangeNotifier {
     try {
       final result = await _repository.update(id, request);
       if (result) {
-        await loadMedicines();
+        await _reload();
       }
       return result;
     } catch (e) {
@@ -103,7 +99,7 @@ class MedicineViewmodel extends ChangeNotifier {
   Future<bool> deleteMedicine(int id) async {
     try {
       await _repository.delete(id);
-      await loadMedicines();
+      await _reload();
       return true;
     } catch (e) {
       _error = 'Không thể xóa thuốc: $e';
