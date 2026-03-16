@@ -43,6 +43,7 @@ dependencies:
   font_awesome_flutter: ^10.6.0
   percent_indicator: ^4.2.3
   fl_chart: ^0.66.0
+  http: ^1.2.0
 
   # State Management & Di
   get_it: ^7.6.4
