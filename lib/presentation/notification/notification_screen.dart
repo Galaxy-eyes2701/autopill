@@ -102,13 +102,15 @@ class _NotificationScreenState extends State<NotificationScreen>
     );
 
     // ── 2. Load cữ BỎ LỠ 7 NGÀY TRƯỚC (không uống) ──────────────────────────
+    // Bắt đầu từ d=1 (hôm qua) để tránh trùng với _loadDayItems(hôm nay)
     for (int d = 1; d <= 7; d++) {
-      final pastDate = now.subtract(Duration(days: d));
+      final pastDate = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: d));
       await _loadMissedDayItems(
-        db:       db,
-        userId:   userId,
-        date:     pastDate,
-        items:    items,
+        db:     db,
+        userId: userId,
+        date:   pastDate,
+        items:  items,
       );
     }
 
@@ -196,21 +198,30 @@ class _NotificationScreenState extends State<NotificationScreen>
     const dayMap = {1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: 'CN'};
     final dayCode = dayMap[date.weekday] ?? '';
 
-    // Chỉ lấy schedule chạy ngày đó VÀ không có record 'taken'
+    // Chỉ lấy schedule:
+    //  1. Chạy ngày đó (active_days match)
+    //  2. Không có intake 'taken' ngày đó
+    //  3. Đã từng có ít nhất 1 intake record bất kỳ (để tránh lịch mới đặt
+    //     bị báo missed cho các ngày trước khi schedule được tạo)
     final rows = await db.rawQuery('''
       SELECT 
         s.id AS schedule_id, s.medicine_id, s.time, s.label,
         s.dose_quantity, s.active_days,
         m.name AS medicine_name, m.category, m.form_type, m.dosage_unit,
-        ih.status AS intake_status
+        ih_day.status AS intake_status
       FROM schedules s
       INNER JOIN medicines m ON m.id = s.medicine_id
-      LEFT JOIN intake_history ih
-        ON ih.schedule_id = s.id
-        AND ih.scheduled_at >= ? AND ih.scheduled_at < ?
+      -- Intake của đúng ngày đang check
+      LEFT JOIN intake_history ih_day
+        ON ih_day.schedule_id = s.id
+        AND ih_day.scheduled_at >= ? AND ih_day.scheduled_at < ?
+      -- Bất kỳ intake nào của schedule này (để biết schedule đã active từ trước)
+      INNER JOIN intake_history ih_any
+        ON ih_any.schedule_id = s.id
       WHERE m.user_id = ?
         AND s.is_active = 1
-        AND (ih.id IS NULL OR ih.status != 'taken')
+        AND (ih_day.id IS NULL OR ih_day.status != 'taken')
+      GROUP BY s.id
       ORDER BY s.time ASC
     ''', [startOfDay, endOfDay, userId]);
 
