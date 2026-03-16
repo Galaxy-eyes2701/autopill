@@ -69,7 +69,7 @@ class _MainScreenState extends State<MainScreen> {
             );
           }
         },
-        backgroundColor: const Color(0xFF137FEC), // Màu xanh chủ đạo
+        backgroundColor: const Color(0xFF137FEC),
         shape: const CircleBorder(),
         child: const Icon(Icons.add, color: Colors.white, size: 32),
       ),
