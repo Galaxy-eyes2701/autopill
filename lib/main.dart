@@ -1,4 +1,4 @@
-// lib/main.dart
+// lib/main.dart — thêm AlarmService.instance.init()
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -11,15 +11,15 @@ import 'package:autopill/presentation/auth/login_screen.dart';
 import 'package:autopill/main_screen.dart';
 import 'package:autopill/presentation/dashboard/dashboard_screen.dart';
 import 'package:autopill/core/services/notification_service.dart';
+import 'package:autopill/core/services/alarm_service.dart';
+
+import 'data/implementations/local/app_database.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Khởi tạo NotificationService (xin quyền Android 13+, init timezone)
+  // NotificationService: vẫn giữ cho các thông báo thường + test button
   await NotificationService.instance.init();
-
-  // Khi user tap thông báo → điều hướng về MainScreen
-  // Dùng callback để tránh circular import trong notification_service.dart
   NotificationService.instance.setOnTapCallback((_) {
     autopillNavigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const MainScreen()),
@@ -27,22 +27,45 @@ void main() async {
     );
   });
 
+  // AlarmService: khởi tạo MethodChannel + lắng nghe action từ native
+  AlarmService.instance.init();
+
+  // Khi user bấm "Đã uống" trực tiếp từ notification alarm
+  // → ghi nhận vào DB (tuỳ logic muốn xử lý thêm)
+  AlarmService.instance.onAlarmTaken = (scheduleId) async {
+    debugPrint('[AutoPill] Alarm taken for schedule: $scheduleId');
+    
+    // Mark as taken in database
+    final db = await AppDatabase.instance.database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    
+    // Check if already recorded
+    final existing = await db.query(
+      'intake_history',
+      where: 'schedule_id = ? AND status = ?',
+      whereArgs: [scheduleId, 'taken'],
+    );
+    
+    if (existing.isEmpty) {
+      await db.insert('intake_history', {
+        'schedule_id': scheduleId,
+        'medicine_id': scheduleId, // Will need to get actual medicine_id from schedule
+        'scheduled_at': now,
+        'taken_at': now,
+        'status': 'taken',
+      });
+      debugPrint('[AutoPill] Medicine marked as taken for schedule: $scheduleId');
+    }
+  };
+
   final prefs      = await SharedPreferences.getInstance();
   final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-
-  final loginViewModel    = buildLogin();
-  final medicineViewModel = buildMedicine();
-
-  // Restore currentUser nếu đã đăng nhập từ trước
-  if (isLoggedIn) {
-    await loginViewModel.checkSession();
-  }
 
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider<LoginViewModel>.value(value: loginViewModel),
-        ChangeNotifierProvider<MedicineViewmodel>.value(value: medicineViewModel),
+        ChangeNotifierProvider(create: (_) => buildLogin()),
+        ChangeNotifierProvider(create: (_) => buildMedicine()),
       ],
       child: MyApp(isLoggedIn: isLoggedIn),
     ),
@@ -59,13 +82,8 @@ class MyApp extends StatelessWidget {
       title: 'AutoPill',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue),
-
-      // Gán navigatorKey để NotificationService điều hướng được
       navigatorKey: autopillNavigatorKey,
-
       navigatorObservers: [dashboardRouteObserver],
-
-      // Chỉ dùng home, KHÔNG dùng routes: {'/'} — tránh lỗi xung đột
       home: isLoggedIn ? const MainScreen() : const LoginScreen(),
     );
   }

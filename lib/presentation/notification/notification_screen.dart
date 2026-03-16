@@ -1,5 +1,3 @@
-// lib/presentation/notification/notification_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -114,6 +112,18 @@ class _NotificationScreenState extends State<NotificationScreen>
       );
     }
 
+    // ── 3. FIX: Filter lại tất cả items - chỉ lấy cữ từ quá khứ hoặc hôm nay ──
+    // Loại bỏ các cữ từ ngày hôm sau trở đi
+    items.removeWhere((item) {
+      final itemDate = DateTime(
+        item.scheduledDate.year,
+        item.scheduledDate.month,
+        item.scheduledDate.day,
+      );
+      final today = DateTime(now.year, now.month, now.day);
+      return itemDate.isAfter(today);
+    });
+
     if (mounted) {
       setState(() {
         _items   = items;
@@ -185,12 +195,23 @@ class _NotificationScreenState extends State<NotificationScreen>
 
   // ── Load cữ BỎ LỠ của ngày trong quá khứ ────────────────────────────────────
   // Chỉ lấy những cữ KHÔNG có intake_history = 'taken'
+  // FIX: Thêm validation để đảm bảo chỉ lấy từ quá khứ và kiểm tra scheduleDate
   Future<void> _loadMissedDayItems({
     required dynamic  db,
     required int      userId,
     required DateTime date,
     required List<_NotifItem> items,
   }) async {
+    final now = DateTime.now();
+
+    // FIX: Kiểm tra ngày này không phải là ngày hôm sau hoặc tương lai
+    final checkDate = DateTime(date.year, date.month, date.day);
+    final today = DateTime(now.year, now.month, now.day);
+    if (checkDate.isAfter(today)) {
+      // Không load cữ từ ngày hôm sau trở đi
+      return;
+    }
+
     final startOfDay = DateTime(date.year, date.month, date.day)
         .millisecondsSinceEpoch;
     final endOfDay   = startOfDay + const Duration(days: 1).inMilliseconds;
@@ -199,14 +220,12 @@ class _NotificationScreenState extends State<NotificationScreen>
     final dayCode = dayMap[date.weekday] ?? '';
 
     // Chỉ lấy schedule:
-    //  1. Chạy ngày đó (active_days match)
+    //  1. Chạy ngày đó (schedule_date match HOẶC active_days match)
     //  2. Không có intake 'taken' ngày đó
-    //  3. Đã từng có ít nhất 1 intake record bất kỳ (để tránh lịch mới đặt
-    //     bị báo missed cho các ngày trước khi schedule được tạo)
     final rows = await db.rawQuery('''
       SELECT 
         s.id AS schedule_id, s.medicine_id, s.time, s.label,
-        s.dose_quantity, s.active_days,
+        s.dose_quantity, s.active_days, s.schedule_date,
         m.name AS medicine_name, m.category, m.form_type, m.dosage_unit,
         ih_day.status AS intake_status
       FROM schedules s
@@ -215,23 +234,20 @@ class _NotificationScreenState extends State<NotificationScreen>
       LEFT JOIN intake_history ih_day
         ON ih_day.schedule_id = s.id
         AND ih_day.scheduled_at >= ? AND ih_day.scheduled_at < ?
-      -- Bất kỳ intake nào của schedule này (để biết schedule đã active từ trước)
-      INNER JOIN intake_history ih_any
-        ON ih_any.schedule_id = s.id
       WHERE m.user_id = ?
         AND s.is_active = 1
+        AND (
+          -- Schedule có ngày cụ thể trùng với ngày check
+          (s.schedule_date IS NOT NULL AND s.schedule_date != '' AND s.schedule_date = ?)
+          OR
+          -- Schedule dùng active_days (lịch cũ)
+          (s.schedule_date IS NULL OR s.schedule_date = '')
+        )
         AND (ih_day.id IS NULL OR ih_day.status != 'taken')
-      GROUP BY s.id
       ORDER BY s.time ASC
-    ''', [startOfDay, endOfDay, userId]);
+    ''', [startOfDay, endOfDay, userId, '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}']);
 
     for (final row in rows) {
-      final activeDays = (row['active_days'] as String? ?? '').split(',');
-      // Kiểm tra schedule có chạy vào ngày này không
-      if (activeDays.isNotEmpty &&
-          !activeDays.contains(dayCode) &&
-          !activeDays.contains('')) continue;
-
       final timeStr = row['time'] as String;
       final parts   = timeStr.split(':');
       final schedDt = DateTime(date.year, date.month, date.day,

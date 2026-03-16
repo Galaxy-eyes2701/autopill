@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:autopill/domain/entities/schedule.dart';
 import 'package:autopill/data/implementations/local/app_database.dart';
-import 'package:autopill/core/services/notification_service.dart';
+import 'package:autopill/core/services/alarm_service.dart';
 
 Future<void> showEditScheduleSheet(
     BuildContext context, {
@@ -155,19 +155,19 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
     }
   }
 
-  // ── Huỷ thông báo cũ ──────────────────────────────────────────────────────
+  // ── Huỷ alarm cũ ──────────────────────────────────────────────────────
   Future<void> _cancelOldNotifications(int scheduleId) async {
     // Huỷ cả 2 dạng ID để đảm bảo không sót:
     // - Dạng cũ: scheduleId * 1000 + offset (0..13)
     // - Dạng mới: scheduleId * 1000 + 0 (chỉ 1 slot)
     for (int offset = 0; offset < 14; offset++) {
-      await NotificationService.instance.cancel(scheduleId * 1000 + offset);
+      await AlarmService.instance.cancelAlarm(scheduleId * 1000 + offset);
     }
   }
 
-  /// FIX: Lên lịch thông báo theo đúng logic hiện tại của app.
+  /// FIX: Lên alarm theo đúng logic hiện tại của app.
   ///
-  /// - Nếu schedule có [scheduleDate] (hướng B mới) → lên đúng 1 thông báo
+  /// - Nếu schedule có [scheduleDate] (hướng B mới) → lên đúng 1 alarm
   ///   cho ngày + giờ cụ thể đó.
   /// - Nếu không có scheduleDate (lịch cũ dùng activeDays) → fallback về
   ///   logic 14 ngày theo thứ trong tuần như trước.
@@ -199,13 +199,13 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       // Bỏ qua nếu đã qua giờ
       if (scheduledDateTime.isBefore(now)) return;
 
-      await NotificationService.instance.scheduleMedicationAt(
-        id:            scheduleId * 1000, // slot 0
-        medicineName:  medicineName,
-        time:          time,
-        dose:          doseStr,
-        label:         label.isNotEmpty ? label : null,
-        scheduledDate: scheduledDateTime,
+      await AlarmService.instance.scheduleAlarm(
+        notifId:      scheduleId * 1000, // slot 0
+        scheduleId:   scheduleId,
+        medicineName: medicineName,
+        doseLabel:    label.isNotEmpty ? '$doseStr • $label' : doseStr,
+        time:         time,
+        scheduledAt:  scheduledDateTime,
       );
       return;
     }
@@ -232,13 +232,13 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
         if (!activeDays.contains(matchCode)) continue;
       }
 
-      await NotificationService.instance.scheduleMedicationAt(
-        id:            scheduleId * 1000 + offset,
-        medicineName:  medicineName,
-        time:          time,
-        dose:          doseStr,
-        label:         label.isNotEmpty ? label : null,
-        scheduledDate: candidate,
+      await AlarmService.instance.scheduleAlarm(
+        notifId:      scheduleId * 1000 + offset,
+        scheduleId:   scheduleId,
+        medicineName: medicineName,
+        doseLabel:    label.isNotEmpty ? '$doseStr • $label' : doseStr,
+        time:         time,
+        scheduledAt:  candidate,
       );
     }
   }

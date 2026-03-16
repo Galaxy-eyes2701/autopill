@@ -9,6 +9,7 @@ import 'package:autopill/data/implementations/local/app_database.dart';
 import 'package:autopill/domain/entities/schedule.dart';
 import 'package:autopill/di.dart';
 
+import '../../core/services/alarm_service.dart';
 import '../../viewmodels/medicine/medicine_viewmodel.dart';
 import '../../viewmodels/schedule/schedule_viewmodel.dart';
 import 'edit_schedule_sheet.dart';
@@ -182,6 +183,13 @@ class _DashboardBodyState extends State<_DashboardBody>
   }
 
   Future<void> _markAsTaken(Schedule schedule) async {
+    // Stop alarm sound first if playing
+    try {
+      await AlarmService.instance.stopAlarm();
+    } catch (e) {
+      debugPrint('Error stopping alarm: $e');
+    }
+    
     final db = await AppDatabase.instance.database;
     final now = DateTime.now();
     final sel = _selectedDate;
