@@ -10,9 +10,9 @@ enum ScheduleViewState { initial, loading, success, error }
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum StockLevel {
-  sufficient, // ✅ Đủ thuốc
-  low,        // 🟡 Còn ít, sắp hết — cảnh báo
-  empty,      // 🔴 Hết thuốc — chặn
+  sufficient,
+  low,
+  empty,
 }
 
 class StockResult {
@@ -34,9 +34,9 @@ class StockResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum DuplicateLevel {
-  none,     // ✅ Không trùng
-  sameTime, // 🔴 Cùng thuốc + cùng giờ + trùng ngày → CHẶN
-  sameDay,  // 🟡 Cùng thuốc + khác giờ + trùng ngày → CẢNH BÁO
+  none,
+  sameTime,
+  sameDay,
 }
 
 class DuplicateResult {
@@ -93,14 +93,12 @@ class ScheduleViewModel extends ChangeNotifier {
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
 
-  /// [specificDates]: danh sách ngày cụ thể dạng 'yyyy-MM-dd'.
-  /// Mỗi ngày tạo 1 schedule riêng trong DB.
   Future<bool> addSchedule({
     required int    medicineId,
     required String time,
     String?         label,
     required double doseQuantity,
-    required List<String> specificDates, // e.g. ['2025-03-16', '2025-03-17']
+    required List<String> specificDates,
     String medicineName = '',
     String dosageUnit   = 'viên',
   }) async {
@@ -118,8 +116,8 @@ class ScheduleViewModel extends ChangeNotifier {
           time:         time,
           label:        label,
           doseQuantity: doseQuantity,
-          activeDays:   [],          // không lặp theo thứ
-          scheduleDate: dateStr,     // ngày cụ thể
+          activeDays:   [],
+          scheduleDate: dateStr,
         );
 
         final scheduleId = await _repository.addSchedule(schedule);
@@ -214,12 +212,6 @@ class ScheduleViewModel extends ChangeNotifier {
   }
 
   // ── Alarm helpers ─────────────────────────────────────────────────────────
-
-  /// Lên alarm kiểu báo thức cho đúng 1 ngày cụ thể (dateStr = 'yyyy-MM-dd').
-  /// Dùng AlarmService thay vì NotificationService để có:
-  ///   - Sáng màn hình khi tắt (RTC_WAKEUP)
-  ///   - Âm thanh lặp lại (USAGE_ALARM + isLooping)
-  ///   - Full-screen intent
   Future<void> _scheduleAlarmForDate({
     required int    scheduleId,
     required String medicineName,
@@ -251,7 +243,7 @@ class ScheduleViewModel extends ChangeNotifier {
         : doseStr;
 
     await AlarmService.instance.scheduleAlarm(
-      notifId:      scheduleId * 1000, // 1 notifId duy nhất cho 1 ngày cụ thể
+      notifId:      scheduleId * 1000,
       scheduleId:   scheduleId,
       medicineName: medicineName,
       doseLabel:    doseLabel,
@@ -262,12 +254,11 @@ class ScheduleViewModel extends ChangeNotifier {
 
   // ── Duplicate check ───────────────────────────────────────────────────────
 
-  /// Kiểm tra trùng theo ngày cụ thể (không theo thứ nữa).
   Future<DuplicateResult> checkDuplicate({
     required int    medicineId,
     required String time,
     required double doseQuantity,
-    required List<String> specificDates, // ['yyyy-MM-dd', ...]
+    required List<String> specificDates,
     int? excludeScheduleId,
   }) async {
     try {
@@ -305,7 +296,6 @@ class ScheduleViewModel extends ChangeNotifier {
 
   // ── Stock check ───────────────────────────────────────────────────────────
 
-  /// [totalDays]: số ngày được chọn để tính đúng tổng nhu cầu thuốc.
   Future<StockResult> checkStock({
     required int    medicineId,
     required double dosePerTake,

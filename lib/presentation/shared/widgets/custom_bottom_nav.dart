@@ -44,7 +44,7 @@ class CustomBottomNav extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(width: 40), // Khoảng trống cho nút FAB
+          const SizedBox(width: 40),
           // Nhóm bên phải
           Row(
             children: [

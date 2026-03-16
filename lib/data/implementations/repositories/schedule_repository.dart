@@ -99,9 +99,6 @@ class ScheduleRepository implements IScheduleRepository {
         .toList();
   }
 
-  /// FIX B: Query lịch theo danh sách ngày cụ thể (schedule_date).
-  /// Dùng để checkDuplicate — chỉ tìm lịch nào có ngày trùng với
-  /// các ngày người dùng vừa chọn, không phụ thuộc vào active_days/thứ.
   @override
   Future<List<Schedule>> getSchedulesByMedicineAndDates({
     required int medicineId,

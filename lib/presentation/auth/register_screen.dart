@@ -180,7 +180,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 32),
-            _buildRequiredLabel('Họ và tên'), // Dùng hàm mới có dấu *
+            _buildRequiredLabel('Họ và tên'),
             _buildTextField(
               controller: _nameController,
               hint: 'Nguyễn Văn A',
@@ -192,7 +192,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               },
             ),
             const SizedBox(height: 16),
-            _buildRequiredLabel('Ngày sinh'), // Thêm label Ngày sinh
+            _buildRequiredLabel('Ngày sinh'),
             _buildBirthDateSection(),
             if (_dobError != null)
               Padding(
@@ -258,7 +258,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // Hàm tạo Label mới tích hợp dấu * đỏ cho các trường bắt buộc
+
   Widget _buildRequiredLabel(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: RichText(

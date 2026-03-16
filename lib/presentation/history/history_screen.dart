@@ -67,7 +67,7 @@ class _HistoryScreenState extends State<HistoryScreen>
   int _userId = 0;
   DateTime _today = DateTime.now();
   DateTime _selectedDate = DateTime.now();
-  DateTime _displayMonth = DateTime.now(); // tháng đang hiển thị trong calendar
+  DateTime _displayMonth = DateTime.now();
 
   List<_HistoryItem> _items = [];
   bool _loading = true;
@@ -120,7 +120,7 @@ class _HistoryScreenState extends State<HistoryScreen>
   String _dateKey(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  // Load tóm tắt cho toàn bộ tháng
+
   Future<void> _loadMonthSummary(DateTime month) async {
     if (_userId == 0) return;
     final db = await AppDatabase.instance.database;
@@ -318,7 +318,7 @@ class _HistoryScreenState extends State<HistoryScreen>
   void _prevMonth() {
     setState(() {
       _displayMonth = DateTime(_displayMonth.year, _displayMonth.month - 1);
-      _summaryCache.clear(); // clear để reload tháng mới
+      _summaryCache.clear();
     });
     _loadMonthSummary(_displayMonth);
     HapticFeedback.lightImpact();
@@ -327,7 +327,7 @@ class _HistoryScreenState extends State<HistoryScreen>
   void _nextMonth() {
     final next = DateTime(_displayMonth.year, _displayMonth.month + 1);
     if (next.isAfter(DateTime(_today.year, _today.month)))
-      return; // Không cho sang tháng tương lai
+      return;
     setState(() {
       _displayMonth = next;
       _summaryCache.clear();
@@ -457,7 +457,6 @@ class _HistoryScreenState extends State<HistoryScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Month nav
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -484,7 +483,7 @@ class _HistoryScreenState extends State<HistoryScreen>
             children: [
               _StatChip(
                 value: '$_monthTotal',
-                label: 'Tổng cữ',
+                label: 'Tổng số lần thiết lập',
                 icon: Icons.medication_rounded,
                 color: Colors.white,
               ),
@@ -577,8 +576,8 @@ class _HistoryScreenState extends State<HistoryScreen>
       _displayMonth.month + 1,
       0,
     ).day;
-    // Thứ của ngày đầu tháng (0=CN, 1=T2, ... 6=T7)
-    int startWeekday = firstDay.weekday % 7; // Monday=1 => 1, Sunday=7 => 0
+
+    int startWeekday = firstDay.weekday % 7;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),

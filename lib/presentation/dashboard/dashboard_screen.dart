@@ -15,7 +15,7 @@ import '../../viewmodels/schedule/schedule_viewmodel.dart';
 import 'edit_schedule_sheet.dart';
 import 'package:autopill/presentation/notification/notification_screen.dart';
 
-/// RouteObserver toàn cục
+
 final RouteObserver<ModalRoute<void>> dashboardRouteObserver =
 RouteObserver<ModalRoute<void>>();
 
@@ -48,7 +48,7 @@ class _DashboardBodyState extends State<_DashboardBody>
   final Map<int, String> _medicineUnits = {};
   int _userId = 0;
 
-  /// Ngày đang xem (mặc định hôm nay)
+
   DateTime _selectedDate = DateTime.now();
 
   bool get _isToday {
@@ -69,7 +69,6 @@ class _DashboardBodyState extends State<_DashboardBody>
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
 
-  // FIX 2: Timer tự động rebuild mỗi phút để cập nhật trạng thái theo thời gian
   late Timer _ticker;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -81,7 +80,7 @@ class _DashboardBodyState extends State<_DashboardBody>
     _fadeAnim =
         CurvedAnimation(parent: _animController, curve: Curves.easeOut);
 
-    // FIX 2: Khởi động timer, setState mỗi phút để _diffMinutes luôn được tính lại
+
     _ticker = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -97,7 +96,6 @@ class _DashboardBodyState extends State<_DashboardBody>
   void dispose() {
     dashboardRouteObserver.unsubscribe(this);
     _animController.dispose();
-    // FIX 2: Huỷ timer khi widget bị dispose
     _ticker.cancel();
     super.dispose();
   }
@@ -175,7 +173,6 @@ class _DashboardBodyState extends State<_DashboardBody>
       final d = date.day.toString().padLeft(2, '0');
       return s.scheduleDate == '$y-$m-$d';
     }
-    // Fallback: schedule cũ dùng active_days (thứ trong tuần)
     if (s.activeDays.isEmpty) return true;
     final dayMap = {1:'2', 2:'3', 3:'4', 4:'5', 5:'6', 6:'7', 7:'CN'};
     final dayCode = dayMap[date.weekday] ?? '';
@@ -183,7 +180,6 @@ class _DashboardBodyState extends State<_DashboardBody>
   }
 
   Future<void> _markAsTaken(Schedule schedule) async {
-    // Stop alarm sound first if playing
     try {
       await AlarmService.instance.stopAlarm();
     } catch (e) {

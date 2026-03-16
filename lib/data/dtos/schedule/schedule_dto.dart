@@ -1,4 +1,3 @@
-/// DTO dùng để map dữ liệu từ/đến SQLite
 class ScheduleDto {
   final int? id;
   final int medicineId;

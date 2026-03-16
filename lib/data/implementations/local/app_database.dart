@@ -361,18 +361,7 @@ class AppDatabase {
       ],
     ];
 
-    // ────────────────────────────────────────────────────────────────────────
-    // TẠO SCHEDULE + INTAKE HISTORY CHO 30 NGÀY QUA + HÔM NAY
-    //
-    // Pattern uống (theo từng thuốc, dùng index % 7 để tạo pattern đa dạng):
-    //  - Phần lớn ngày: taken (uống đúng)
-    //  - Một số ngày: missed (bỏ lỡ)
-    //  - Hôm nay: tùy giờ hiện tại
-    // ────────────────────────────────────────────────────────────────────────
 
-    // Pattern missed: mỗi thuốc có ngày bỏ lỡ khác nhau để calendar đa màu
-    // index = ngày (0 = hôm nay, 1 = hôm qua, ...)
-    // true = uống, false = bỏ lỡ
     bool _wasTaken(int medicineIndex, int daysAgo) {
       // Tạo pattern đa dạng dựa trên medicineIndex và daysAgo
       final patterns = [

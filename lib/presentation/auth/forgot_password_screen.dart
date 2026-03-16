@@ -113,7 +113,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                   size: 80, color: AppColors.primary),
             ),
             const SizedBox(height: 24),
-            Text('Anh quên mật khẩu ư?',
+            Text('Bạn quên mật khẩu đúng không?',
                 style: GoogleFonts.lexend(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,

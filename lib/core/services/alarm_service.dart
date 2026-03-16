@@ -1,5 +1,3 @@
-// lib/core/services/alarm_service.dart
-// Flutter side: giao tiếp với AlarmScheduler native qua MethodChannel
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,14 +25,13 @@ class AlarmService {
     });
   }
 
-  // ── Lên lịch alarm (thay thế notification_service.scheduleMedicationAt) ──
-  // notifId = scheduleId * 1000 + dayOffset (giữ nguyên convention cũ)
+  // ── Lên lịch alarm  ──
   Future<bool> scheduleAlarm({
     required int      notifId,
     required int      scheduleId,
     required String   medicineName,
-    required String   doseLabel,   // "1 viên • Sau ăn sáng"
-    required String   time,        // "08:00"
+    required String   doseLabel,
+    required String   time,
     required DateTime scheduledAt,
   }) async {
     try {

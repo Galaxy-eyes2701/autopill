@@ -9,7 +9,7 @@ class LoginResponseDto {
     required this.user,
   });
 
-  // Chuyển Map (JSON) từ Server trả về thành Object trong Flutter
+  // Chuyển Map (JSON) thành Object
   factory LoginResponseDto.fromJson(Map<String, dynamic> json) {
     return LoginResponseDto(
       // Nếu Server trả về null thì gán chuỗi rỗng để tránh crash app
@@ -18,7 +18,7 @@ class LoginResponseDto {
     );
   }
 
-  // Dự phòng trường hợp bạn cần chuyển ngược lại thành JSON
+
   Map<String, dynamic> toJson() {
     return {
       'token': token,

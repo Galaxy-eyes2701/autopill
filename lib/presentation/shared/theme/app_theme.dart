@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// --- Hệ thống Màu sắc & Theme (Giữ nguyên cấu trúc của bạn) ---
 class AppColors {
   static const Color primary = Color(0xFF137FEC);
   static const Color backgroundLight = Color(0xFFF6F7F8);
@@ -22,7 +21,6 @@ class AppTheme {
   }
 }
 
-// --- Custom Button để thay thế ElevatedButton (Khắc phục lỗi undefined_method) ---
 class AutoPillButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;
@@ -48,7 +46,6 @@ class AutoPillButton extends StatelessWidget {
           height: isOutlined ? 56 : 64,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            // SỬA TẠI ĐÂY: Thay BorderSide bằng Border.all
             border: isOutlined
                 ? Border.all(color: AppColors.primary, width: 2)
                 : null,
@@ -147,7 +144,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 24),
 
-              // Nút Đăng Nhập (Đã thay thế)
+              // Nút Đăng Nhập
               AutoPillButton(
                 text: 'ĐĂNG NHẬP NGAY',
                 onPressed: () {
@@ -157,7 +154,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 40),
 
-              // Nút Đăng Ký (Đã thay thế)
+              // Nút Đăng Ký
               Text('Bạn chưa có tài khoản?',
                   style: TextStyle(color: AppColors.textGray)),
               const SizedBox(height: 12),

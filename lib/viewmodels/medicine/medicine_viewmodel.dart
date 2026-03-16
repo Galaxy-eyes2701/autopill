@@ -17,7 +17,6 @@ class MedicineViewmodel extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  // Lấy thuốc theo user ID (dùng chính)
   Future<void> loadMedicinesByUserId(int userId) async {
     _currentUserId = userId;
     _isLoading = true;
@@ -34,17 +33,14 @@ class MedicineViewmodel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Reload lại với userId đã lưu
   Future<void> _reload() async {
     if (_currentUserId != 0) {
       await loadMedicinesByUserId(_currentUserId);
     }
   }
 
-  // Giữ lại để tương thích, nhưng không nên dùng trực tiếp
   Future<void> loadMedicines() => _reload();
 
-  // Lấy thuốc cảnh báo (sắp hết)
   Future<List<MedicineResponseDto>> getWarningMedicines(int userId) async {
     try {
       return await _repository.getWarningMedicines(userId);
@@ -179,7 +175,7 @@ class MedicineViewmodel extends ChangeNotifier {
       dosageAmount:   old.dosageAmount,
       dosageUnit:     old.dosageUnit,
       formType:       old.formType,
-      stockCurrent:   newStock,       // ← chỉ đổi mỗi cái này
+      stockCurrent:   newStock,
       stockThreshold: old.stockThreshold,
       status:         old.status,
     );

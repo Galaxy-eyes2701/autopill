@@ -38,7 +38,6 @@ class LoginViewModel extends ChangeNotifier {
     }
   }
 
-  // Kiem tra phien dang nhap khi mo app
   Future<void> checkSession() async {
     _currentUser = await _repository.getCurrentSession();
     notifyListeners();

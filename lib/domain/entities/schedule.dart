@@ -1,10 +1,10 @@
 class Schedule {
   final int? id;
   final int medicineId;
-  final String time; // "08:00"
+  final String time;
   final String? label;
   final double doseQuantity;
-  final List<String> activeDays; // ["2","3","4","5","6","7","CN"]
+  final List<String> activeDays;
   final String? scheduleDate;
   final bool isActive;
 

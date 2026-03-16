@@ -6,13 +6,11 @@ import 'package:autopill/viewmodels/medicine/medicine_viewmodel.dart';
 import 'package:autopill/data/dtos/medicines/medicine_request_dto.dart';
 import 'package:autopill/data/dtos/medicines/medicine_response_dto.dart';
 
-// ─── Design tokens (đồng bộ với AddMedicineStockScreen) ─────────────────────
 class AppColors {
   static const Color primary = Color(0xFF137FEC);
   static const Color backgroundLight = Color(0xFFF6F7F8);
 }
 
-// ─── Model dạng thuốc (giống hệt AddMedicineStockScreen) ─────────────────────
 class _FormType {
   final String label;
   final String value;

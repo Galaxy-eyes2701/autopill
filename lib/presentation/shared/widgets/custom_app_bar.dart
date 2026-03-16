@@ -10,7 +10,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
     super.key,
     required this.title,
     this.onNotificationTap,
-    this.notificationCount = 0, // Mặc định là 0
+    this.notificationCount = 0,
   });
 
   @override
@@ -25,7 +25,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
         padding: const EdgeInsets.all(8.0),
         child: CircleAvatar(
           backgroundImage: NetworkImage(
-            "https://i.pravatar.cc/150?img=12", // Link ảnh demo ổn định hơn
+            "https://i.pravatar.cc/150?img=12",
           ),
           radius: 20,
         ),
@@ -40,13 +40,12 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
       ),
       centerTitle: true,
 
-      // --- PHẦN BÁC CẦN SỬA NẰM Ở ĐÂY ---
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: 16),
           child: Stack(
             alignment:
-                Alignment.topRight, // Căn lề các lớp con về góc trên phải
+                Alignment.topRight,
             children: [
               // 1. LỚP DƯỚI: Nút bấm Icon nền tròn
               Container(
@@ -70,11 +69,11 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
                   child: Container(
                     padding: const EdgeInsets.all(3),
                     decoration: BoxDecoration(
-                      color: Colors.red, // Màu đỏ nổi bật
+                      color: Colors.red,
                       shape: BoxShape.circle,
                       border: Border.all(
                           color: Colors.white,
-                          width: 2), // Viền trắng để tách biệt với icon
+                          width: 2),
                     ),
                     constraints: const BoxConstraints(
                       minWidth: 18,
@@ -83,7 +82,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
                     child: Text(
                       notificationCount > 9
                           ? '9+'
-                          : notificationCount.toString(), // Nếu > 9 thì hiện 9+
+                          : notificationCount.toString(),
                       style: GoogleFonts.lexend(
                         color: Colors.white,
                         fontSize: 10,

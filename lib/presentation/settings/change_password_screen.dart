@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-// ĐẢM BẢO IMPORT ĐÚNG ĐƯỜNG DẪN APP_DATABASE CỦA BẠN
 import '../../data/implementations/local/app_database.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
@@ -22,7 +20,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool _obscureConfirm = true;
   bool _isLoading = false;
 
-  // CÁC BIẾN LƯU TRỮ THÔNG BÁO LỖI (HIỂN THỊ DƯỚI TEXTFIELD)
+
   String? _currentPasswordError;
   String? _newPasswordError;
   String? _confirmPasswordError;
@@ -72,14 +70,10 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       _confirmPasswordError = 'Mật khẩu xác nhận không khớp';
       hasError = true;
     }
-
-    // Nếu có lỗi ở UI thì dừng lại, hiện đỏ các ô
     if (hasError) {
       setState(() {});
       return;
     }
-
-    // 5. Nếu Pass UI hợp lệ -> Bắt đầu gọi Database
     setState(() => _isLoading = true);
 
     try {
@@ -96,7 +90,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         return;
       }
 
-      // GỌI DB THẬT ĐỂ KIỂM TRA MẬT KHẨU CŨ VÀ CẬP NHẬT MẬT KHẨU MỚI
       bool isSuccess = await AppDatabase.instance
           .changePassword(userEmail, oldPass, newPass);
 
@@ -200,7 +193,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     );
   }
 
-  // Cập nhật hàm vẽ TextField để hỗ trợ truyền tham số errorText
   Widget _buildPasswordField({
     required String label,
     required TextEditingController controller,
@@ -218,7 +210,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         TextField(
           controller: controller,
           obscureText: isObscured,
-          // Mỗi khi người dùng gõ phím, tự động xóa dòng báo lỗi
           onChanged: (value) {
             if (errorText != null) {
               setState(() {
@@ -234,7 +225,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
           decoration: InputDecoration(
             filled: true,
             fillColor: Colors.white,
-            errorText: errorText, // THUỘC TÍNH HIỂN THỊ CHỮ ĐỎ Ở DƯỚI
+            errorText: errorText,
             errorStyle: GoogleFonts.lexend(color: Colors.red),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),

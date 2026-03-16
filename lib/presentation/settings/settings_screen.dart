@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../auth/login_screen.dart';
 import 'profile_screen.dart';
 import 'notification_settings_screen.dart';
-import 'change_password_screen.dart'; // IMPORT MÀN HÌNH ĐỔI MẬT KHẨU
+import 'change_password_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});

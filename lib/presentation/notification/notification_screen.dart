@@ -7,7 +7,7 @@ import 'package:autopill/core/services/notification_service.dart';
 import 'package:autopill/presentation/settings/notification_settings_screen.dart';
 
 // ─── Enum trạng thái ──────────────────────────────────────────────────────────
-enum DoseStatus { upcoming, current, overdue, missed, taken }
+enum DoseStatus { future, upcoming, current, overdue, missed, taken }
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 class _NotifItem {
@@ -19,7 +19,7 @@ class _NotifItem {
   final String doseLabel;
   final String formType;
   final DoseStatus status;
-  final DateTime scheduledDate; // ngày + giờ cụ thể của cữ này
+  final DateTime scheduledDate;
 
   const _NotifItem({
     required this.scheduleId,
@@ -73,7 +73,25 @@ class _NotificationScreenState extends State<NotificationScreen>
     super.dispose();
   }
 
-  // ── Load data ────────────────────────────────────────────────────────────────
+  // ── Helper: schedule có chạy vào ngày này không ───────────────────────────
+  bool _scheduleRunsOnDate(Map<String, Object?> row, DateTime date) {
+    final scheduleDate = row['schedule_date'] as String? ?? '';
+    final activeDays   = row['active_days']   as String? ?? '';
+
+    if (scheduleDate.isNotEmpty) {
+      final y = date.year.toString().padLeft(4, '0');
+      final m = date.month.toString().padLeft(2, '0');
+      final d = date.day.toString().padLeft(2, '0');
+      return scheduleDate == '$y-$m-$d';
+    }
+
+    if (activeDays.isEmpty) return true;
+    const dayMap = {1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: 'CN'};
+    final dayCode = dayMap[date.weekday] ?? '';
+    return activeDays.split(',').contains(dayCode);
+  }
+
+  // ── Load data ─────────────────────────────────────────────────────────────
   Future<void> _load() async {
     setState(() => _loading = true);
     _prefs = await NotificationService.instance.loadPrefs();
@@ -87,42 +105,21 @@ class _NotificationScreenState extends State<NotificationScreen>
 
     final db  = await AppDatabase.instance.database;
     final now = DateTime.now();
-
     final List<_NotifItem> items = [];
 
-    // ── 1. Load cữ HÔM NAY ───────────────────────────────────────────────────
-    await _loadDayItems(
-      db:     db,
-      userId: userId,
-      date:   now,
-      now:    now,
-      items:  items,
-    );
+    // ── 1. Hôm nay ──────────────────────────────────────────────────────────
+    await _loadTodayItems(db: db, userId: userId, now: now, items: items);
 
-    // ── 2. Load cữ BỎ LỠ 7 NGÀY TRƯỚC (không uống) ──────────────────────────
-    // Bắt đầu từ d=1 (hôm qua) để tránh trùng với _loadDayItems(hôm nay)
+    // ── 2. Tương lai (ngày mai trở đi) — tất cả lịch đã thiết lập ───────────
+    await _loadFutureItems(db: db, userId: userId, now: now, items: items);
+
+    // ── 3. Quá khứ bỏ lỡ (7 ngày trước) ────────────────────────────────────
     for (int d = 1; d <= 7; d++) {
       final pastDate = DateTime(now.year, now.month, now.day)
           .subtract(Duration(days: d));
       await _loadMissedDayItems(
-        db:     db,
-        userId: userId,
-        date:   pastDate,
-        items:  items,
-      );
+          db: db, userId: userId, date: pastDate, items: items);
     }
-
-    // ── 3. FIX: Filter lại tất cả items - chỉ lấy cữ từ quá khứ hoặc hôm nay ──
-    // Loại bỏ các cữ từ ngày hôm sau trở đi
-    items.removeWhere((item) {
-      final itemDate = DateTime(
-        item.scheduledDate.year,
-        item.scheduledDate.month,
-        item.scheduledDate.day,
-      );
-      final today = DateTime(now.year, now.month, now.day);
-      return itemDate.isAfter(today);
-    });
 
     if (mounted) {
       setState(() {
@@ -133,25 +130,21 @@ class _NotificationScreenState extends State<NotificationScreen>
     }
   }
 
-  // ── Load tất cả cữ của một ngày cụ thể (hôm nay) ───────────────────────────
-  Future<void> _loadDayItems({
-    required dynamic db,
-    required int     userId,
-    required DateTime date,
+  // ── Load cữ HÔM NAY ───────────────────────────────────────────────────────
+  Future<void> _loadTodayItems({
+    required dynamic  db,
+    required int      userId,
     required DateTime now,
     required List<_NotifItem> items,
   }) async {
-    final startOfDay = DateTime(date.year, date.month, date.day)
-        .millisecondsSinceEpoch;
-    final endOfDay   = startOfDay + const Duration(days: 1).inMilliseconds;
-
-    const dayMap = {1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: 'CN'};
-    final todayCode = dayMap[date.weekday] ?? '';
+    final startOfDay =
+        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+    final endOfDay = startOfDay + const Duration(days: 1).inMilliseconds;
 
     final rows = await db.rawQuery('''
-      SELECT 
+      SELECT
         s.id AS schedule_id, s.medicine_id, s.time, s.label,
-        s.dose_quantity, s.active_days,
+        s.dose_quantity, s.active_days, s.schedule_date,
         m.name AS medicine_name, m.category, m.form_type, m.dosage_unit,
         ih.status AS intake_status
       FROM schedules s
@@ -164,90 +157,114 @@ class _NotificationScreenState extends State<NotificationScreen>
     ''', [startOfDay, endOfDay, userId]);
 
     for (final row in rows) {
-      final activeDays = (row['active_days'] as String? ?? '').split(',');
-      if (activeDays.isNotEmpty &&
-          !activeDays.contains(todayCode) &&
-          !activeDays.contains('')) continue;
+      if (!_scheduleRunsOnDate(row, now)) continue;
 
-      final timeStr    = row['time'] as String;
-      final parts      = timeStr.split(':');
-      final schedDt    = DateTime(date.year, date.month, date.day,
+      final timeStr  = row['time'] as String;
+      final parts    = timeStr.split(':');
+      final schedDt  = DateTime(now.year, now.month, now.day,
           int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 0);
-      final diffMin    = now.difference(schedDt).inMinutes;
-      final intakeSt   = row['intake_status'] as String?;
+      final diffMin  = now.difference(schedDt).inMinutes;
+      final intakeSt = row['intake_status'] as String?;
+
+      // Đã uống → bỏ qua, không hiển thị trong Sắp tới
+      if (intakeSt == 'taken') continue;
 
       DoseStatus status;
-      if (intakeSt == 'taken') {
-        status = DoseStatus.taken;
-      } else if (diffMin < -30) {
+      if (diffMin < -30) {
         status = DoseStatus.upcoming;
-      } else if (diffMin >= -30 && diffMin <= 60) {
+      } else if (diffMin >= -30 && diffMin <= 30) {
         status = DoseStatus.current;
-      } else if (diffMin > 60 && diffMin <= 120) {
-        status = DoseStatus.overdue;  // quá 1-2 tiếng: còn cơ hội uống muộn
+      } else if (diffMin > 30 && diffMin <= 60) {
+        status = DoseStatus.overdue;
       } else {
-        status = DoseStatus.missed;   // quá 2 tiếng: bỏ lỡ
+        status = DoseStatus.missed;
       }
 
       items.add(_buildItem(row, schedDt, status));
     }
   }
 
-  // ── Load cữ BỎ LỠ của ngày trong quá khứ ────────────────────────────────────
-  // Chỉ lấy những cữ KHÔNG có intake_history = 'taken'
-  // FIX: Thêm validation để đảm bảo chỉ lấy từ quá khứ và kiểm tra scheduleDate
+  // ── Load lịch TƯƠNG LAI (ngày mai trở đi) ────────────────────────────────
+  Future<void> _loadFutureItems({
+    required dynamic  db,
+    required int      userId,
+    required DateTime now,
+    required List<_NotifItem> items,
+  }) async {
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    // Lấy tất cả schedule còn active, có schedule_date từ ngày mai trở đi
+    final rows = await db.rawQuery('''
+      SELECT
+        s.id AS schedule_id, s.medicine_id, s.time, s.label,
+        s.dose_quantity, s.active_days, s.schedule_date,
+        m.name AS medicine_name, m.category, m.form_type, m.dosage_unit
+      FROM schedules s
+      INNER JOIN medicines m ON m.id = s.medicine_id
+      WHERE m.user_id = ?
+        AND s.is_active = 1
+        AND s.schedule_date IS NOT NULL
+        AND s.schedule_date != ''
+        AND s.schedule_date >= ?
+      ORDER BY s.schedule_date ASC, s.time ASC
+    ''', [
+      userId,
+      '${tomorrow.year}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}',
+    ]);
+
+    for (final row in rows) {
+      final dateStr = row['schedule_date'] as String;
+      final parts2  = dateStr.split('-');
+      if (parts2.length < 3) continue;
+      final date = DateTime(
+        int.parse(parts2[0]),
+        int.parse(parts2[1]),
+        int.parse(parts2[2]),
+      );
+
+      final timeStr = row['time'] as String;
+      final parts   = timeStr.split(':');
+      final schedDt = DateTime(date.year, date.month, date.day,
+          int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 0);
+
+      items.add(_buildItem(row, schedDt, DoseStatus.future));
+    }
+  }
+
+  // ── Load cữ BỎ LỠ của ngày quá khứ ──────────────────────────────────────
   Future<void> _loadMissedDayItems({
     required dynamic  db,
     required int      userId,
     required DateTime date,
     required List<_NotifItem> items,
   }) async {
-    final now = DateTime.now();
-
-    // FIX: Kiểm tra ngày này không phải là ngày hôm sau hoặc tương lai
+    final now       = DateTime.now();
     final checkDate = DateTime(date.year, date.month, date.day);
-    final today = DateTime(now.year, now.month, now.day);
-    if (checkDate.isAfter(today)) {
-      // Không load cữ từ ngày hôm sau trở đi
-      return;
-    }
+    final today     = DateTime(now.year, now.month, now.day);
+    if (!checkDate.isBefore(today)) return;
 
-    final startOfDay = DateTime(date.year, date.month, date.day)
-        .millisecondsSinceEpoch;
+    final startOfDay = checkDate.millisecondsSinceEpoch;
     final endOfDay   = startOfDay + const Duration(days: 1).inMilliseconds;
 
-    const dayMap = {1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: 'CN'};
-    final dayCode = dayMap[date.weekday] ?? '';
-
-    // Chỉ lấy schedule:
-    //  1. Chạy ngày đó (schedule_date match HOẶC active_days match)
-    //  2. Không có intake 'taken' ngày đó
     final rows = await db.rawQuery('''
-      SELECT 
+      SELECT
         s.id AS schedule_id, s.medicine_id, s.time, s.label,
         s.dose_quantity, s.active_days, s.schedule_date,
         m.name AS medicine_name, m.category, m.form_type, m.dosage_unit,
         ih_day.status AS intake_status
       FROM schedules s
       INNER JOIN medicines m ON m.id = s.medicine_id
-      -- Intake của đúng ngày đang check
       LEFT JOIN intake_history ih_day
         ON ih_day.schedule_id = s.id
         AND ih_day.scheduled_at >= ? AND ih_day.scheduled_at < ?
       WHERE m.user_id = ?
         AND s.is_active = 1
-        AND (
-          -- Schedule có ngày cụ thể trùng với ngày check
-          (s.schedule_date IS NOT NULL AND s.schedule_date != '' AND s.schedule_date = ?)
-          OR
-          -- Schedule dùng active_days (lịch cũ)
-          (s.schedule_date IS NULL OR s.schedule_date = '')
-        )
         AND (ih_day.id IS NULL OR ih_day.status != 'taken')
       ORDER BY s.time ASC
-    ''', [startOfDay, endOfDay, userId, '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}']);
+    ''', [startOfDay, endOfDay, userId]);
 
     for (final row in rows) {
+      if (!_scheduleRunsOnDate(row, date)) continue;
+
       final timeStr = row['time'] as String;
       final parts   = timeStr.split(':');
       final schedDt = DateTime(date.year, date.month, date.day,
@@ -257,27 +274,28 @@ class _NotificationScreenState extends State<NotificationScreen>
     }
   }
 
-  // ── Build _NotifItem từ DB row ───────────────────────────────────────────────
-  _NotifItem _buildItem(Map<String, Object?> row, DateTime schedDt, DoseStatus status) {
-    final qty      = (row['dose_quantity'] as num).toInt();
-    final unit     = row['dosage_unit'] as String? ?? 'viên';
-    final lbl      = row['label'] as String? ?? '';
+  // ── Build _NotifItem ──────────────────────────────────────────────────────
+  _NotifItem _buildItem(
+      Map<String, Object?> row, DateTime schedDt, DoseStatus status) {
+    final qty       = (row['dose_quantity'] as num).toInt();
+    final unit      = row['dosage_unit'] as String? ?? 'viên';
+    final lbl       = row['label'] as String? ?? '';
     final doseLabel = lbl.isNotEmpty ? '$qty $unit • $lbl' : '$qty $unit';
 
     return _NotifItem(
-      scheduleId:   row['schedule_id'] as int,
-      medicineId:   row['medicine_id'] as int,
-      medicineName: row['medicine_name'] as String,
-      category:     row['category'] as String? ?? '',
-      time:         row['time'] as String,
-      doseLabel:    doseLabel,
-      formType:     row['form_type'] as String? ?? '',
-      status:       status,
+      scheduleId:    row['schedule_id'] as int,
+      medicineId:    row['medicine_id'] as int,
+      medicineName:  row['medicine_name'] as String,
+      category:      row['category'] as String? ?? '',
+      time:          row['time'] as String,
+      doseLabel:     doseLabel,
+      formType:      row['form_type'] as String? ?? '',
+      status:        status,
       scheduledDate: schedDt,
     );
   }
 
-  // ── Mark as taken ────────────────────────────────────────────────────────────
+  // ── Mark as taken ─────────────────────────────────────────────────────────
   Future<void> _markTaken(_NotifItem item) async {
     HapticFeedback.mediumImpact();
     final db  = await AppDatabase.instance.database;
@@ -330,22 +348,24 @@ class _NotificationScreenState extends State<NotificationScreen>
     ));
   }
 
-  // ── Filtered lists ───────────────────────────────────────────────────────────
+  // ── Filtered lists ────────────────────────────────────────────────────────
   List<_NotifItem> get _upcomingList => _items
       .where((i) =>
-  i.status == DoseStatus.upcoming ||
+  i.status == DoseStatus.future   ||
+      i.status == DoseStatus.upcoming ||
       i.status == DoseStatus.current  ||
-      i.status == DoseStatus.overdue  ||
-      i.status == DoseStatus.taken)
-      .toList();
+      i.status == DoseStatus.overdue)
+      .toList()
+    ..sort((a, b) => a.scheduledDate.compareTo(b.scheduledDate));
 
   List<_NotifItem> get _missedList =>
-      _items.where((i) => i.status == DoseStatus.missed).toList();
+      _items.where((i) => i.status == DoseStatus.missed).toList()
+        ..sort((a, b) => b.scheduledDate.compareTo(a.scheduledDate));
 
   List<_NotifItem> get _activeList =>
       _selectedTab == 0 ? _upcomingList : _missedList;
 
-  // ── Build ────────────────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -370,14 +390,32 @@ class _NotificationScreenState extends State<NotificationScreen>
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                        (_, i) => FadeTransition(
-                      opacity: _fadeAnim,
-                      child: _NotifCard(
-                        item:         _activeList[i],
-                        soundEnabled: _prefs.soundEnabled,
-                        onTaken:      () => _markTaken(_activeList[i]),
-                      ),
-                    ),
+                        (_, i) {
+                      final item = _activeList[i];
+                      // Header ngày (nhóm theo ngày)
+                      final showHeader = i == 0 ||
+                          !_isSameDay(
+                              _activeList[i - 1].scheduledDate,
+                              item.scheduledDate);
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (showHeader) _DateHeader(date: item.scheduledDate),
+                          FadeTransition(
+                            opacity: _fadeAnim,
+                            child: _NotifCard(
+                              item:         item,
+                              soundEnabled: _prefs.soundEnabled,
+                              onTaken: item.status == DoseStatus.current ||
+                                  item.status == DoseStatus.overdue ||
+                                  item.status == DoseStatus.missed
+                                  ? () => _markTaken(item)
+                                  : null,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                     childCount: _activeList.length,
                   ),
                 ),
@@ -388,7 +426,10 @@ class _NotificationScreenState extends State<NotificationScreen>
     );
   }
 
-  // ── AppBar ────────────────────────────────────────────────────────────────────
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  // ── AppBar ────────────────────────────────────────────────────────────────
   Widget _buildAppBar() {
     return SliverAppBar(
       pinned: true,
@@ -415,8 +456,7 @@ class _NotificationScreenState extends State<NotificationScreen>
       ],
       flexibleSpace: FlexibleSpaceBar(
         centerTitle: false,
-        titlePadding:
-        const EdgeInsets.only(left: 56, bottom: 14, right: 56),
+        titlePadding: const EdgeInsets.only(left: 56, bottom: 14, right: 56),
         title: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -430,8 +470,7 @@ class _NotificationScreenState extends State<NotificationScreen>
               _prefs.soundEnabled
                   ? '🔔 Thông báo có âm thanh'
                   : '🔕 Thông báo im lặng',
-              style: GoogleFonts.lexend(
-                  fontSize: 10, color: Colors.white70),
+              style: GoogleFonts.lexend(fontSize: 10, color: Colors.white70),
             ),
           ],
         ),
@@ -448,7 +487,7 @@ class _NotificationScreenState extends State<NotificationScreen>
     );
   }
 
-  // ── Sound banner ─────────────────────────────────────────────────────────────
+  // ── Sound banner ──────────────────────────────────────────────────────────
   Widget _buildSoundBanner() {
     return SliverToBoxAdapter(
       child: AnimatedContainer(
@@ -498,8 +537,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                 setState(() {});
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: _blue.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
@@ -517,9 +555,8 @@ class _NotificationScreenState extends State<NotificationScreen>
     );
   }
 
-  // ── Tab bar ───────────────────────────────────────────────────────────────────
+  // ── Tab bar ───────────────────────────────────────────────────────────────
   Widget _buildTabBar() {
-    final missedCount = _missedList.length;
     return SliverToBoxAdapter(
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -547,7 +584,7 @@ class _NotificationScreenState extends State<NotificationScreen>
             ),
             _TabBtn(
               label:    'Đã bỏ lỡ',
-              count:    missedCount,
+              count:    _missedList.length,
               selected: _selectedTab == 1,
               color:    _danger,
               onTap: () {
@@ -567,6 +604,65 @@ class _NotificationScreenState extends State<NotificationScreen>
     } catch (_) {
       return 'Mặc định';
     }
+  }
+}
+
+// ─── Date Header ─────────────────────────────────────────────────────────────
+class _DateHeader extends StatelessWidget {
+  final DateTime date;
+  const _DateHeader({required this.date});
+
+  String get _label {
+    final now   = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final d     = DateTime(date.year, date.month, date.day);
+    final diff  = d.difference(today).inDays;
+
+    if (diff == 0) return 'Hôm nay';
+    if (diff == 1) return 'Ngày mai';
+    if (diff == -1) return 'Hôm qua';
+
+    const weekdays = ['', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật'];
+    return '${weekdays[date.weekday]}, ${date.day}/${date.month}/${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now   = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final d     = DateTime(date.year, date.month, date.day);
+    final isToday = d == today;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16, bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: isToday
+                  ? const Color(0xFF137FEC).withOpacity(0.1)
+                  : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              _label,
+              style: GoogleFonts.lexend(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: isToday
+                    ? const Color(0xFF137FEC)
+                    : Colors.grey.shade600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Divider(color: Colors.grey.shade200, thickness: 1),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -608,16 +704,14 @@ class _TabBtn extends StatelessWidget {
                 label,
                 style: GoogleFonts.lexend(
                   fontSize: 14,
-                  fontWeight:
-                  selected ? FontWeight.bold : FontWeight.w500,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.w500,
                   color: selected ? color : Colors.grey.shade400,
                 ),
               ),
               if (count > 0) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
                     color: selected ? color : Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(20),
@@ -644,17 +738,18 @@ class _TabBtn extends StatelessWidget {
 class _NotifCard extends StatelessWidget {
   final _NotifItem item;
   final bool soundEnabled;
-  final VoidCallback onTaken;
+  final VoidCallback? onTaken;
 
   static const _blue    = Color(0xFF137FEC);
   static const _success = Color(0xFF16A34A);
   static const _warn    = Color(0xFFF59E0B);
   static const _danger  = Color(0xFFEF4444);
+  static const _purple  = Color(0xFF8B5CF6);
 
   const _NotifCard({
     required this.item,
     required this.soundEnabled,
-    required this.onTaken,
+    this.onTaken,
   });
 
   Color get _accentColor {
@@ -664,6 +759,7 @@ class _NotifCard extends StatelessWidget {
       case DoseStatus.overdue:  return _warn;
       case DoseStatus.missed:   return _danger;
       case DoseStatus.upcoming: return _blue;
+      case DoseStatus.future:   return _purple;
     }
   }
 
@@ -673,7 +769,8 @@ class _NotifCard extends StatelessWidget {
       case DoseStatus.current:  return Icons.alarm_rounded;
       case DoseStatus.overdue:  return Icons.warning_amber_rounded;
       case DoseStatus.missed:   return Icons.cancel_rounded;
-      case DoseStatus.upcoming: return Icons.event_rounded;
+      case DoseStatus.upcoming: return Icons.schedule_rounded;
+      case DoseStatus.future:   return Icons.event_rounded;
     }
   }
 
@@ -683,20 +780,9 @@ class _NotifCard extends StatelessWidget {
       case DoseStatus.current:  return 'Đến giờ uống';
       case DoseStatus.overdue:  return 'Quá giờ';
       case DoseStatus.missed:   return 'Đã bỏ lỡ';
-      case DoseStatus.upcoming: return 'Sắp đến';
+      case DoseStatus.upcoming: return 'Chưa đến giờ';
+      case DoseStatus.future:   return 'Đã lên lịch';
     }
-  }
-
-  // Hiển thị ngày nếu không phải hôm nay
-  String get _dateLabel {
-    final now  = DateTime.now();
-    final date = item.scheduledDate;
-    if (date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day) return '';
-    final diff = now.difference(date).inDays;
-    if (diff == 1) return 'Hôm qua';
-    return '${date.day}/${date.month}';
   }
 
   Color get _bgColor {
@@ -704,6 +790,7 @@ class _NotifCard extends StatelessWidget {
       case DoseStatus.current:  return const Color(0xFFEFF6FF);
       case DoseStatus.overdue:  return const Color(0xFFFFFBEB);
       case DoseStatus.missed:   return const Color(0xFFFEF2F2);
+      case DoseStatus.future:   return const Color(0xFFF5F3FF);
       default:                  return Colors.white;
     }
   }
@@ -717,10 +804,7 @@ class _NotifCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: _accentColor.withOpacity(
-              item.status == DoseStatus.upcoming ||
-                  item.status == DoseStatus.taken
-                  ? 0.0
-                  : 0.25),
+              item.status == DoseStatus.upcoming ? 0.0 : 0.2),
         ),
         boxShadow: [
           BoxShadow(
@@ -735,7 +819,7 @@ class _NotifCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
+            // ── Header ──────────────────────────────────────────────────────
             Row(
               children: [
                 Container(
@@ -763,38 +847,25 @@ class _NotifCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Giờ + badge ngày (nếu ngày khác hôm nay)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _accentColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(item.time,
-                          style: GoogleFonts.lexend(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: _accentColor)),
-                    ),
-                    if (_dateLabel.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(_dateLabel,
-                          style: GoogleFonts.lexend(
-                              fontSize: 10,
-                              color: _accentColor.withOpacity(0.7),
-                              fontWeight: FontWeight.w600)),
-                    ],
-                  ],
+                // Giờ
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: _accentColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(item.time,
+                      style: GoogleFonts.lexend(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: _accentColor)),
                 ),
               ],
             ),
             const SizedBox(height: 10),
 
-            // Dose info + sound badge
+            // ── Dose info + sound badge ──────────────────────────────────────
             Row(
               children: [
                 Icon(Icons.medication_liquid_rounded,
@@ -815,7 +886,7 @@ class _NotifCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
 
-            // Status + action
+            // ── Status + action ──────────────────────────────────────────────
             Row(
               children: [
                 Icon(_statusIcon, size: 15, color: _accentColor),
@@ -826,30 +897,33 @@ class _NotifCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         color: _accentColor)),
                 const Spacer(),
-                if (item.status == DoseStatus.current)
-                  _ActionBtn(
-                    label: 'Xác nhận uống',
-                    icon:  Icons.check_rounded,
-                    color: _blue,
-                    filled: true,
-                    onTap: onTaken,
-                  )
-                else if (item.status == DoseStatus.overdue)
-                  _ActionBtn(
-                    label: 'Uống muộn',
-                    icon:  Icons.schedule_rounded,
-                    color: _warn,
-                    filled: false,
-                    onTap: onTaken,
-                  )
-                else if (item.status == DoseStatus.missed)
+                // Nút hành động chỉ hiện khi có callback (hôm nay)
+                if (onTaken != null) ...[
+                  if (item.status == DoseStatus.current)
                     _ActionBtn(
-                      label: 'Đánh dấu đã uống',
-                      icon:  Icons.edit_rounded,
-                      color: _danger,
+                      label: 'Xác nhận uống',
+                      icon:  Icons.check_rounded,
+                      color: _blue,
+                      filled: true,
+                      onTap: onTaken!,
+                    )
+                  else if (item.status == DoseStatus.overdue)
+                    _ActionBtn(
+                      label: 'Uống muộn',
+                      icon:  Icons.schedule_rounded,
+                      color: _warn,
                       filled: false,
-                      onTap: onTaken,
-                    ),
+                      onTap: onTaken!,
+                    )
+                  else if (item.status == DoseStatus.missed)
+                      _ActionBtn(
+                        label: 'Đánh dấu đã uống',
+                        icon:  Icons.edit_rounded,
+                        color: _danger,
+                        filled: false,
+                        onTap: onTaken!,
+                      ),
+                ],
               ],
             ),
           ],
@@ -859,7 +933,7 @@ class _NotifCard extends StatelessWidget {
   }
 }
 
-// ─── Small badge ──────────────────────────────────────────────────────────────
+// ─── Small badge ─────────────────────────────────────────────────────────────
 class _SmallBadge extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -916,20 +990,16 @@ class _ActionBtn extends StatelessWidget {
         onTap();
       },
       child: Container(
-        padding:
-        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: filled ? color : color.withOpacity(0.08),
           borderRadius: BorderRadius.circular(10),
-          border:
-          filled ? null : Border.all(color: color.withOpacity(0.3)),
+          border: filled ? null : Border.all(color: color.withOpacity(0.3)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon,
-                size: 14,
-                color: filled ? Colors.white : color),
+            Icon(icon, size: 14, color: filled ? Colors.white : color),
             const SizedBox(width: 6),
             Text(label,
                 style: GoogleFonts.lexend(
@@ -975,7 +1045,7 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 16),
           Text(
             tab == 0
-                ? 'Không có lịch uống thuốc hôm nay'
+                ? 'Không có lịch uống sắp tới'
                 : 'Tuyệt vời! Không có cữ nào bị bỏ lỡ 🎉',
             style: GoogleFonts.lexend(
                 fontSize: 16,

@@ -1,4 +1,4 @@
-// lib/presentation/dashboard/edit_schedule_sheet.dart
+
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -121,10 +121,10 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       final medicineName = medRows.first['name'] as String;
       final dosageUnit   = medRows.first['dosage_unit'] as String? ?? 'viên';
 
-      // 3. Huỷ thông báo cũ
+
       await _cancelOldNotifications(widget.schedule.id!);
 
-      // 4. FIX: Lên lịch lại theo scheduleDate cụ thể thay vì activeDays
+
       await _rescheduleNotification(
         scheduleId:   widget.schedule.id!,
         medicineName: medicineName,
@@ -132,8 +132,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
         doseQty:      _doseQty,
         dosageUnit:   dosageUnit,
         label:        _labelCtrl.text.trim(),
-        scheduleDate: widget.schedule.scheduleDate, // FIX: dùng ngày cụ thể
-        activeDays:   widget.schedule.activeDays,   // fallback cho lịch cũ
+        scheduleDate: widget.schedule.scheduleDate,
+        activeDays:   widget.schedule.activeDays,
       );
     }
 
@@ -157,20 +157,12 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
 
   // ── Huỷ alarm cũ ──────────────────────────────────────────────────────
   Future<void> _cancelOldNotifications(int scheduleId) async {
-    // Huỷ cả 2 dạng ID để đảm bảo không sót:
-    // - Dạng cũ: scheduleId * 1000 + offset (0..13)
-    // - Dạng mới: scheduleId * 1000 + 0 (chỉ 1 slot)
     for (int offset = 0; offset < 14; offset++) {
       await AlarmService.instance.cancelAlarm(scheduleId * 1000 + offset);
     }
   }
 
-  /// FIX: Lên alarm theo đúng logic hiện tại của app.
-  ///
-  /// - Nếu schedule có [scheduleDate] (hướng B mới) → lên đúng 1 alarm
-  ///   cho ngày + giờ cụ thể đó.
-  /// - Nếu không có scheduleDate (lịch cũ dùng activeDays) → fallback về
-  ///   logic 14 ngày theo thứ trong tuần như trước.
+
   Future<void> _rescheduleNotification({
     required int    scheduleId,
     required String medicineName,
@@ -187,7 +179,6 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
     final doseStr = '$doseQty $dosageUnit';
     final now     = DateTime.now();
 
-    // ── Hướng B: có scheduleDate cụ thể ──────────────────────────────────
     if (scheduleDate != null && scheduleDate.isNotEmpty) {
       final dateParts = scheduleDate.split('-');
       final year  = int.tryParse(dateParts[0]) ?? 0;
@@ -200,7 +191,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       if (scheduledDateTime.isBefore(now)) return;
 
       await AlarmService.instance.scheduleAlarm(
-        notifId:      scheduleId * 1000, // slot 0
+        notifId:      scheduleId * 1000,
         scheduleId:   scheduleId,
         medicineName: medicineName,
         doseLabel:    label.isNotEmpty ? '$doseStr • $label' : doseStr,

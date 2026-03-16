@@ -12,7 +12,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _dobController = TextEditingController(); // Thêm controller cho ngày sinh
+  final TextEditingController _dobController = TextEditingController();
   bool _isLoading = false;
 
   @override
@@ -26,7 +26,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() {
       _nameController.text = prefs.getString('userName') ?? '';
       _emailController.text = prefs.getString('userEmail') ?? '';
-      _dobController.text = prefs.getString('userDob') ?? ''; // Load ngày sinh
+      _dobController.text = prefs.getString('userDob') ?? '';
     });
   }
 
@@ -37,9 +37,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // Lưu thông tin mới vào máy
     await prefs.setString('userName', _nameController.text.trim());
     await prefs.setString('userEmail', _emailController.text.trim());
-    await prefs.setString('userDob', _dobController.text.trim()); // Lưu ngày sinh
+    await prefs.setString('userDob', _dobController.text.trim());
 
-    // Giả lập thời gian lưu API
     await Future.delayed(const Duration(seconds: 1));
 
     if (!mounted) return;
@@ -50,7 +49,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           content: Text('Cập nhật thông tin thành công!'),
           backgroundColor: Colors.green),
     );
-    Navigator.pop(context, true); // Trả về true báo hiệu đã update
+    Navigator.pop(context, true);
   }
 
   @override
@@ -157,7 +156,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     return Theme(
                       data: Theme.of(context).copyWith(
                         colorScheme: const ColorScheme.light(
-                          primary: Color(0xFF137FEC), // Màu chủ đạo
+                          primary: Color(0xFF137FEC),
                         ),
                       ),
                       child: child!,

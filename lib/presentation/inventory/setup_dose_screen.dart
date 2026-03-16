@@ -81,11 +81,27 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     }
   }
 
+  // ── FIX: Kiểm tra ngày + giờ còn trong tương lai ─────────────────────────
+  bool _isDateTimeValid(DateTime date) {
+    final now = DateTime.now();
+    final scheduled = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      _selectedTime.hour,
+      _selectedTime.minute,
+    );
+    return scheduled.isAfter(now.add(const Duration(minutes: 1)));
+  }
+
   // ── Init ──────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
-    _selectedDates.add(_dateOptions.first);
+    final firstDate = _dateOptions.first;
+    if (_isDateTimeValid(firstDate)) {
+      _selectedDates.add(firstDate);
+    }
     _animController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _fadeAnim =
@@ -117,18 +133,18 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     setState(() {
       _medicines = rows
           .map((r) => Medicine(
-        id:             r['id'] as int,
-        userId:         r['user_id'] as int,
-        name:           r['name'] as String,
-        category:       r['category'] as String?,
-        dosageAmount:   r['dosage_amount'] != null
+        id: r['id'] as int,
+        userId: r['user_id'] as int,
+        name: r['name'] as String,
+        category: r['category'] as String?,
+        dosageAmount: r['dosage_amount'] != null
             ? (r['dosage_amount'] as num).toDouble()
             : null,
-        dosageUnit:     r['dosage_unit'] as String?,
-        formType:       r['form_type'] as String?,
-        stockCurrent:   r['stock_current'] as int? ?? 0,
+        dosageUnit: r['dosage_unit'] as String?,
+        formType: r['form_type'] as String?,
+        stockCurrent: r['stock_current'] as int? ?? 0,
         stockThreshold: r['stock_threshold'] as int? ?? 0,
-        status:         r['status'] as String? ?? 'active',
+        status: r['status'] as String? ?? 'active',
       ))
           .toList();
       _loadingMedicines = false;
@@ -141,8 +157,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
       '${_selectedTime.hour.toString().padLeft(2, '0')}:'
           '${_selectedTime.minute.toString().padLeft(2, '0')}';
 
-  /// FIX B: Trả về danh sách ngày cụ thể dạng 'yyyy-MM-dd'
-  /// thay vì thứ trong tuần.
+  /// Trả về danh sách ngày cụ thể dạng 'yyyy-MM-dd'
   List<String> get _specificDates {
     final sorted = _selectedDates.toList()..sort();
     return sorted.map((d) {
@@ -153,10 +168,17 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     }).toList();
   }
 
+  // ── FIX: Đổi giờ → tự động bỏ ngày không còn hợp lệ ─────────────────────
   Future<void> _pickTime() async {
     final picked =
     await showTimePicker(context: context, initialTime: _selectedTime);
-    if (picked != null) setState(() => _selectedTime = picked);
+    if (picked != null) {
+      setState(() {
+        _selectedTime = picked;
+        // Bỏ các ngày đã chọn mà với giờ mới trở thành quá khứ
+        _selectedDates.removeWhere((d) => !_isDateTimeValid(d));
+      });
+    }
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
@@ -188,26 +210,24 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
 
     // ── Bước 1: kiểm tra tồn kho dài hạn ────────────────────────────────
     for (final entry in _selectedMedicines.entries) {
-      final medicine    = _medicines.firstWhere((m) => m.id == entry.key);
+      final medicine = _medicines.firstWhere((m) => m.id == entry.key);
       final dosePerTake = entry.value.toDouble();
-      final totalDays   = _selectedDates.length; // FIX: truyền đúng số ngày
+      final totalDays = _selectedDates.length;
 
-      // Đếm số lần uống trong 1 ngày (lịch hiện có + lịch đang thêm)
       final existingOnDay = await vm.checkDuplicate(
-        medicineId:    entry.key,
-        time:          _timeString,
-        doseQuantity:  dosePerTake,
-        specificDates: _specificDates, // FIX B
+        medicineId: entry.key,
+        time: _timeString,
+        doseQuantity: dosePerTake,
+        specificDates: _specificDates,
       );
       final takesPerDay =
       existingOnDay.level == DuplicateLevel.sameDay ? 2 : 1;
 
-      // FIX: truyền totalDays để checkStock tính đúng nhu cầu thực tế
       final stockResult = await vm.checkStock(
-        medicineId:  entry.key,
+        medicineId: entry.key,
         dosePerTake: dosePerTake,
         takesPerDay: takesPerDay,
-        totalDays:   totalDays,
+        totalDays: totalDays,
       );
 
       if (!mounted) return;
@@ -233,11 +253,10 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     for (final entry in _selectedMedicines.entries) {
       final medicine = _medicines.firstWhere((m) => m.id == entry.key);
 
-      // FIX B: truyền specificDates thay vì không truyền gì
       final result = await vm.checkDuplicate(
-        medicineId:    entry.key,
-        time:          _timeString,
-        doseQuantity:  entry.value.toDouble(),
+        medicineId: entry.key,
+        time: _timeString,
+        doseQuantity: entry.value.toDouble(),
         specificDates: _specificDates,
       );
 
@@ -263,18 +282,20 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     bool allOk = true;
     for (final entry in _selectedMedicines.entries) {
       final medicine = _medicines.firstWhere((m) => m.id == entry.key);
-
-      // FIX B: truyền specificDates thay vì activeDays
-      final ok = await vm.addSchedule(
-        medicineId:    entry.key,
-        time:          _timeString,
-        label:         _labelController.text.trim(),
-        doseQuantity:  entry.value.toDouble(),
-        specificDates: _specificDates,
-        medicineName:  medicine.name,
-        dosageUnit:    doseUnitFromFormType(medicine.formType),
-      );
-      if (!ok) allOk = false;
+      try {
+        final ok = await vm.addSchedule(
+          medicineId: entry.key,
+          time: _timeString,
+          label: _labelController.text.trim(),
+          doseQuantity: entry.value.toDouble(),
+          specificDates: _specificDates,
+          medicineName: medicine.name,
+          dosageUnit: doseUnitFromFormType(medicine.formType),
+        );
+        if (!ok) allOk = false;
+      } catch (e) {
+        debugPrint('addSchedule warning (alarm plugin): $e');
+      }
     }
 
     if (!mounted) return;
@@ -286,7 +307,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
     }
   }
 
-  // ── Dialogs (giữ nguyên) ──────────────────────────────────────────────────
+  // ── Dialogs ───────────────────────────────────────────────────────────────
   Future<void> _showStockEmptyDialog(String medicineName) {
     return showDialog(
       context: context,
@@ -352,7 +373,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
   Future<bool> _showStockLowDialog(
       String medicineName, int stockCurrent, int daysCanCover,
       [String? formType]) async {
-    final unit      = doseUnitFromFormType(formType);
+    final unit = doseUnitFromFormType(formType);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -565,8 +586,8 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
 
   Future<bool> _showWarningDialog(
       String medicineName, double totalDose, [String? formType]) async {
-    final unit      = doseUnitFromFormType(formType);
-    final doseText  = totalDose.toInt().toString();
+    final unit = doseUnitFromFormType(formType);
+    final doseText = totalDose.toInt().toString();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -788,19 +809,22 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
               child: Padding(
                 padding: const EdgeInsets.only(right: 10),
                 child: _PresetTile(
-                  emoji:    p['emoji'] as String,
-                  label:    p['label'] as String,
+                  emoji: p['emoji'] as String,
+                  label: p['label'] as String,
                   isActive: isActive,
-                  onTap: () => setState(() {
-                    _selectedTime = TimeOfDay(
-                        hour: p['h'] as int, minute: p['m'] as int);
-                    final label = p['label'] as String;
-                    _labelController.text = label == 'Sáng'
-                        ? 'Sau ăn sáng'
-                        : label == 'Trưa'
-                        ? 'Sau ăn trưa'
-                        : 'Sau ăn tối';
-                  }),
+                  onTap: () {
+                    setState(() {
+                      _selectedTime = TimeOfDay(
+                          hour: p['h'] as int, minute: p['m'] as int);
+                      final label = p['label'] as String;
+                      _labelController.text = label == 'Sáng'
+                          ? 'Sau ăn sáng'
+                          : label == 'Trưa'
+                          ? 'Sau ăn trưa'
+                          : 'Sau ăn tối';
+                      _selectedDates.removeWhere((d) => !_isDateTimeValid(d));
+                    });
+                  },
                 ),
               ),
             );
@@ -860,12 +884,11 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
           padding: EdgeInsets.zero,
           child: TextField(
             controller: _labelController,
-            style: GoogleFonts.lexend(
-                fontSize: 16, fontWeight: FontWeight.w500),
+            style:
+            GoogleFonts.lexend(fontSize: 16, fontWeight: FontWeight.w500),
             decoration: InputDecoration(
               hintText: 'Ví dụ: Sau ăn sáng...',
-              hintStyle:
-              GoogleFonts.lexend(color: Colors.grey.shade400),
+              hintStyle: GoogleFonts.lexend(color: Colors.grey.shade400),
               prefixIcon: const Icon(Icons.label_outline_rounded,
                   color: Color(0xFF137FEC)),
               border: InputBorder.none,
@@ -886,15 +909,17 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _Label(
-                text: 'Ngày uống (${_selectedDates.length} đã chọn)'),
+            _Label(text: 'Ngày uống (${_selectedDates.length} đã chọn)'),
             Row(
               children: [
                 _QuickBtn(
                   label: 'Hàng ngày',
-                  onTap: () => setState(() => _selectedDates
-                    ..clear()
-                    ..addAll(_dateOptions)),
+                  onTap: () => setState(() {
+                    _selectedDates
+                      ..clear()
+                      ..addAll(
+                          _dateOptions.where((d) => _isDateTimeValid(d)));
+                  }),
                 ),
                 const SizedBox(width: 8),
                 _QuickBtn(
@@ -907,22 +932,26 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
         ),
         const SizedBox(height: 10),
         _Card(
-          padding:
-          const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
           child: SizedBox(
             height: 88,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: _dateOptions.length,
               itemBuilder: (_, i) {
-                final date       = _dateOptions[i];
+                final date = _dateOptions[i];
                 final isSelected = _selectedDates.contains(date);
-                final isToday    = i == 0;
+                final isToday = i == 0;
+                final isDisabled = !_isDateTimeValid(date);
+
                 return _DateChip(
-                  date:       date,
-                  isSelected: isSelected,
-                  isToday:    isToday,
-                  onTap: () {
+                  date: date,
+                  isSelected: isSelected && !isDisabled,
+                  isToday: isToday,
+                  isDisabled: isDisabled,
+                  onTap: isDisabled
+                      ? null
+                      : () {
                     HapticFeedback.selectionClick();
                     setState(() {
                       if (isSelected) {
@@ -995,8 +1024,8 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                     size: 48, color: Colors.grey.shade300),
                 const SizedBox(height: 8),
                 Text('Kho thuốc trống',
-                    style: GoogleFonts.lexend(
-                        color: Colors.grey.shade400)),
+                    style:
+                    GoogleFonts.lexend(color: Colors.grey.shade400)),
               ],
             ),
           )
@@ -1029,8 +1058,8 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
 
     return Consumer<ScheduleViewModel>(
       builder: (context, vm, _) {
-        final isLoading  = vm.state == ScheduleViewState.loading;
-        final canSubmit  = !isLoading && !hasBlockedMedicine;
+        final isLoading = vm.state == ScheduleViewState.loading;
+        final canSubmit = !isLoading && !hasBlockedMedicine;
 
         return Container(
           padding: EdgeInsets.fromLTRB(
@@ -1065,7 +1094,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
                 child: isLoading
                     ? const SizedBox(
                     height: 22,
-                    width:  22,
+                    width: 22,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5))
                     : Text(
@@ -1090,25 +1119,18 @@ class _DateChip extends StatelessWidget {
   final DateTime date;
   final bool isSelected;
   final bool isToday;
-  final VoidCallback onTap;
+  final bool isDisabled;
+  final VoidCallback? onTap;
 
   const _DateChip({
     required this.date,
     required this.isSelected,
     required this.isToday,
     required this.onTap,
+    this.isDisabled = false,
   });
 
-  static const _dayLabels = [
-    '',
-    'T2',
-    'T3',
-    'T4',
-    'T5',
-    'T6',
-    'T7',
-    'CN'
-  ];
+  static const _dayLabels = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
   @override
   Widget build(BuildContext context) {
@@ -1120,20 +1142,25 @@ class _DateChip extends StatelessWidget {
         margin: const EdgeInsets.only(right: 10),
         width: 52,
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF137FEC) : Colors.white,
+          color: isDisabled
+              ? Colors.grey.shade100
+              : isSelected
+              ? const Color(0xFF137FEC)
+              : Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: isToday && !isSelected
+          border: isDisabled
+              ? Border.all(color: Colors.grey.shade200)
+              : isToday && !isSelected
               ? Border.all(
               color: const Color(0xFF137FEC), width: 1.5)
               : Border.all(
               color: isSelected
                   ? const Color(0xFF137FEC)
                   : Colors.grey.shade200),
-          boxShadow: isSelected
+          boxShadow: isSelected && !isDisabled
               ? [
             BoxShadow(
-                color:
-                const Color(0xFF137FEC).withOpacity(0.30),
+                color: const Color(0xFF137FEC).withOpacity(0.30),
                 blurRadius: 8,
                 offset: const Offset(0, 3))
           ]
@@ -1147,7 +1174,9 @@ class _DateChip extends StatelessWidget {
               style: GoogleFonts.lexend(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: isSelected
+                color: isDisabled
+                    ? Colors.grey.shade300
+                    : isSelected
                     ? Colors.white70
                     : Colors.grey.shade500,
               ),
@@ -1158,40 +1187,46 @@ class _DateChip extends StatelessWidget {
               style: GoogleFonts.lexend(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: isSelected
+                color: isDisabled
+                    ? Colors.grey.shade300
+                    : isSelected
                     ? Colors.white
                     : const Color(0xFF111418),
               ),
             ),
             const SizedBox(height: 4),
-            isToday
-                ? Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? Colors.white.withOpacity(0.25)
-                    : const Color(0xFF137FEC).withOpacity(0.12),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                'HN',
+            if (isDisabled)
+              Icon(Icons.lock_outline_rounded,
+                  size: 10, color: Colors.grey.shade300)
+            else if (isToday)
+              Container(
+                padding:
+                const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? Colors.white.withOpacity(0.25)
+                      : const Color(0xFF137FEC).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'HN',
+                  style: GoogleFonts.lexend(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected
+                          ? Colors.white
+                          : const Color(0xFF137FEC)),
+                ),
+              )
+            else
+              Text(
+                'th${date.month}',
                 style: GoogleFonts.lexend(
                     fontSize: 9,
-                    fontWeight: FontWeight.bold,
                     color: isSelected
-                        ? Colors.white
-                        : const Color(0xFF137FEC)),
+                        ? Colors.white60
+                        : Colors.grey.shade400),
               ),
-            )
-                : Text(
-              'th${date.month}',
-              style: GoogleFonts.lexend(
-                  fontSize: 9,
-                  color: isSelected
-                      ? Colors.white60
-                      : Colors.grey.shade400),
-            ),
           ],
         ),
       ),
@@ -1227,8 +1262,8 @@ class _MedicineTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unit           = _SetupDoseBodyState.doseUnitFromFormType(medicine.formType);
-    final isOverStock    = doseQty > medicine.stockCurrent;
+    final unit = _SetupDoseBodyState.doseUnitFromFormType(medicine.formType);
+    final isOverStock = doseQty > medicine.stockCurrent;
     final isNearThreshold = !isOverStock &&
         (medicine.stockCurrent - doseQty) < medicine.stockThreshold;
 
@@ -1263,8 +1298,8 @@ class _MedicineTile extends StatelessWidget {
             onTap: () => onToggle(!isSelected),
             borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 14),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
                   Container(
@@ -1347,7 +1382,7 @@ class _MedicineTile extends StatelessWidget {
                     ? Colors.red.withOpacity(0.04)
                     : const Color(0xFF137FEC).withOpacity(0.04),
                 borderRadius: const BorderRadius.only(
-                  bottomLeft:  Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
                   bottomRight: Radius.circular(14),
                 ),
               ),
@@ -1360,7 +1395,6 @@ class _MedicineTile extends StatelessWidget {
                               fontSize: 13,
                               color: Colors.grey.shade600)),
                       const Spacer(),
-                      // Nút trừ — disable khi doseQty == 1
                       _RoundBtn(
                         icon: Icons.remove_rounded,
                         size: 34,
@@ -1390,9 +1424,6 @@ class _MedicineTile extends StatelessWidget {
                           ],
                         ),
                       ),
-                      // FIX 3: Bỏ giới hạn cứng ở đây — cho phép tăng liều
-                      // vượt kho để hiện cảnh báo đỏ, không block UI
-                      // Việc chặn thực sự xảy ra ở nút Submit
                       _RoundBtn(
                         icon: Icons.add_rounded,
                         size: 34,
@@ -1405,21 +1436,19 @@ class _MedicineTile extends StatelessWidget {
                   if (isOverStock) ...[
                     const SizedBox(height: 8),
                     _InlineWarning(
-                      icon:        Icons.block_rounded,
-                      color:       Colors.red,
-                      isBlocking:  true,
-                      text:
-                      'Không đủ thuốc! Tồn kho chỉ còn '
+                      icon: Icons.block_rounded,
+                      color: Colors.red,
+                      isBlocking: true,
+                      text: 'Không đủ thuốc! Tồn kho chỉ còn '
                           '${medicine.stockCurrent} $unit',
                     ),
                   ] else if (isNearThreshold) ...[
                     const SizedBox(height: 8),
                     _InlineWarning(
-                      icon:       Icons.warning_amber_rounded,
-                      color:      Colors.orange,
+                      icon: Icons.warning_amber_rounded,
+                      color: Colors.orange,
                       isBlocking: false,
-                      text:
-                      'Sau lần uống này còn '
+                      text: 'Sau lần uống này còn '
                           '${medicine.stockCurrent - doseQty} $unit '
                           '— dưới ngưỡng cảnh báo '
                           '(${medicine.stockThreshold})',
@@ -1453,12 +1482,11 @@ class _InlineWarning extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color:        color.withOpacity(0.08),
+        color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(8),
-        border:       Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Row(
         children: [
@@ -1474,8 +1502,8 @@ class _InlineWarning extends StatelessWidget {
           if (isBlocking) ...[
             const SizedBox(width: 6),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 6, vertical: 2),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color: color.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(4),
@@ -1511,7 +1539,7 @@ class _Card extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-              color:  Colors.black.withOpacity(0.04),
+              color: Colors.black.withOpacity(0.04),
               blurRadius: 12,
               offset: const Offset(0, 4))
         ],

@@ -1,15 +1,3 @@
-// lib/core/services/notification_service.dart
-//
-// pubspec.yaml — thêm:
-//   flutter_local_notifications: ^17.2.0
-//   timezone: ^0.9.4
-//
-// AndroidManifest.xml — thêm trong <manifest>:
-//   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-//   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-//   <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
-//   <uses-permission android:name="android.permission.VIBRATE"/>
-//   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

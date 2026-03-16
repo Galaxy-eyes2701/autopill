@@ -91,10 +91,9 @@ class _DrugSuggestion {
     }
   }
 
-  // Category = công dụng lấy từ indications_and_usage, rút gọn thành tiếng Việt
+
   String get category {
     if (indication.isNotEmpty) return _parseIndication(indication);
-    // Fallback nếu không có indication
     final g = genericName.toLowerCase();
     if (g.contains('paracetamol') ||
         g.contains('ibuprofen') ||
@@ -117,9 +116,7 @@ class _DrugSuggestion {
   }
 
   static String _parseIndication(String raw) {
-    // Lấy câu đầu tiên của indications_and_usage rồi dịch/rút gọn
     final lower = raw.toLowerCase();
-    // Map từ khoá tiếng Anh → nhãn tiếng Việt ngắn gọn
     final Map<String, String> keyMap = {
       'pain': 'Giảm đau',
       'fever': 'Hạ sốt',
@@ -173,7 +170,6 @@ class _DrugSuggestion {
       if (lower.contains(entry.key)) return entry.value;
     }
 
-    // Nếu không match → lấy 40 ký tự đầu của indication làm fallback
     final trimmed = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
     return trimmed.length > 45 ? '${trimmed.substring(0, 42)}...' : trimmed;
   }
@@ -380,7 +376,6 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
         final brand = brands.isNotEmpty ? _titleCase(brands.first) : '';
         final generic = generics.isNotEmpty ? _titleCase(generics.first) : '';
 
-        // Chỉ giữ kết quả có tên BẮT ĐẦU bằng query (loại kết quả không liên quan)
         final brandMatch = brand.toLowerCase().startsWith(q);
         final genericMatch = generic.toLowerCase().startsWith(q);
         if (!brandMatch && !genericMatch) continue;

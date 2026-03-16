@@ -29,7 +29,6 @@ class RegisterViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Validate methods giữ nguyên
   String? validateEmail(String? email) {
     if (email == null || email.isEmpty) return "Email không được để trống";
     final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
