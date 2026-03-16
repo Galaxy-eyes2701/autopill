@@ -11,15 +11,15 @@ enum ScheduleViewState { initial, loading, success, error }
 
 enum StockLevel {
   sufficient, // ✅ Đủ thuốc
-  low, // 🟡 Còn ít, sắp hết — cảnh báo
-  empty, // 🔴 Hết thuốc — chặn
+  low,        // 🟡 Còn ít, sắp hết — cảnh báo
+  empty,      // 🔴 Hết thuốc — chặn
 }
 
 class StockResult {
   final StockLevel level;
   final int stockCurrent;
   final int stockThreshold;
-  final int daysCanCover; // số ngày có thể uống với liều hiện tại
+  final int daysCanCover;
 
   const StockResult({
     required this.level,
@@ -34,18 +34,14 @@ class StockResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum DuplicateLevel {
-  none, // ✅ Không trùng → cho lưu bình thường
-  sameTime, // 🔴 Cùng thuốc + cùng giờ → CHẶN, không cho lưu
-  sameDay, // 🟡 Cùng thuốc + khác giờ trong ngày → CẢNH BÁO, hỏi user
+  none,     // ✅ Không trùng
+  sameTime, // 🔴 Cùng thuốc + cùng giờ + trùng ngày → CHẶN
+  sameDay,  // 🟡 Cùng thuốc + khác giờ + trùng ngày → CẢNH BÁO
 }
 
 class DuplicateResult {
   final DuplicateLevel level;
-
-  /// Giờ đang bị trùng (chỉ có khi level == sameTime)
   final String? conflictTime;
-
-  /// Tổng số viên/ngày nếu thêm schedule mới (chỉ có khi level == sameDay)
   final double? totalDoseToday;
 
   const DuplicateResult(
@@ -73,7 +69,7 @@ class ScheduleViewModel extends ChangeNotifier {
   List<Schedule> _schedules = [];
   List<Schedule> get schedules => _schedules;
 
-  // ── Load ────────────────────────────────────────────────────────────────────
+  // ── Load ──────────────────────────────────────────────────────────────────
 
   Future<void> loadSchedulesByMedicine(int medicineId) async {
     _setState(ScheduleViewState.loading);
@@ -95,45 +91,54 @@ class ScheduleViewModel extends ChangeNotifier {
     }
   }
 
-  // ── CRUD ────────────────────────────────────────────────────────────────────
+  // ── CRUD ──────────────────────────────────────────────────────────────────
 
+  /// FIX B: [activeDays] giờ là danh sách ngày cụ thể dạng 'yyyy-MM-dd',
+  /// không còn là thứ trong tuần nữa.
+  /// Mỗi ngày được chọn tạo ra 1 bản ghi schedule riêng trong DB.
   Future<bool> addSchedule({
     required int medicineId,
     required String time,
     String? label,
     required double doseQuantity,
-    required List<String> activeDays,
-    // Thông tin thuốc để hiển thị trên thông báo
+    required List<String> specificDates, // e.g. ['2025-03-16', '2025-03-17']
     String medicineName = '',
     String dosageUnit = 'viên',
   }) async {
-    if (!_validate(
-        time: time, doseQuantity: doseQuantity, activeDays: activeDays)) {
+    if (specificDates.isEmpty) {
+      _setError('Vui lòng chọn ít nhất một ngày');
       return false;
     }
+    if (!_validateBasic(time: time, doseQuantity: doseQuantity)) return false;
+
     _setState(ScheduleViewState.loading);
     try {
-      final schedule = Schedule(
-        medicineId: medicineId,
-        time: time,
-        label: label,
-        doseQuantity: doseQuantity,
-        activeDays: activeDays,
-      );
+      // Tạo 1 schedule cho mỗi ngày được chọn
+      for (final dateStr in specificDates) {
+        final schedule = Schedule(
+          medicineId: medicineId,
+          time: time,
+          label: label,
+          doseQuantity: doseQuantity,
+          // FIX B: lưu ngày cụ thể thay vì thứ lặp lại
+          // activeDays rỗng = không lặp; scheduleDate = ngày cụ thể
+          activeDays: [],
+          scheduleDate: dateStr,
+        );
 
-      // Lưu vào DB → lấy scheduleId vừa tạo
-      final scheduleId = await _repository.addSchedule(schedule);
+        final scheduleId = await _repository.addSchedule(schedule);
 
-      // Lên lịch thông báo cho các ngày được chọn
-      await _scheduleNotifications(
-        scheduleId:   scheduleId,
-        medicineName: medicineName,
-        time:         time,
-        doseQuantity: doseQuantity,
-        dosageUnit:   dosageUnit,
-        label:        label,
-        activeDays:   activeDays,
-      );
+        // Lên thông báo cho đúng ngày đó
+        await _scheduleNotificationForDate(
+          scheduleId:   scheduleId,
+          medicineName: medicineName,
+          time:         time,
+          doseQuantity: doseQuantity,
+          dosageUnit:   dosageUnit,
+          label:        label,
+          dateStr:      dateStr,
+        );
+      }
 
       _schedules = await _repository.getSchedulesByMedicine(medicineId);
       _setState(ScheduleViewState.success);
@@ -149,26 +154,27 @@ class ScheduleViewModel extends ChangeNotifier {
         String medicineName = '',
         String dosageUnit = 'viên',
       }) async {
-    if (!_validate(
+    if (!_validateBasic(
       time: schedule.time,
       doseQuantity: schedule.doseQuantity,
-      activeDays: schedule.activeDays,
     )) return false;
+
     _setState(ScheduleViewState.loading);
     try {
       await _repository.updateSchedule(schedule);
-
-      // Huỷ thông báo cũ rồi lên lịch lại
       await _cancelNotifications(schedule.id!);
-      await _scheduleNotifications(
-        scheduleId:   schedule.id!,
-        medicineName: medicineName,
-        time:         schedule.time,
-        doseQuantity: schedule.doseQuantity,
-        dosageUnit:   dosageUnit,
-        label:        schedule.label,
-        activeDays:   schedule.activeDays,
-      );
+
+      if (schedule.scheduleDate != null) {
+        await _scheduleNotificationForDate(
+          scheduleId:   schedule.id!,
+          medicineName: medicineName,
+          time:         schedule.time,
+          doseQuantity: schedule.doseQuantity,
+          dosageUnit:   dosageUnit,
+          label:        schedule.label,
+          dateStr:      schedule.scheduleDate!,
+        );
+      }
 
       _schedules =
       await _repository.getSchedulesByMedicine(schedule.medicineId);
@@ -183,9 +189,7 @@ class ScheduleViewModel extends ChangeNotifier {
   Future<bool> deleteSchedule(int scheduleId, int medicineId) async {
     _setState(ScheduleViewState.loading);
     try {
-      // Huỷ toàn bộ thông báo của schedule này trước khi xoá
       await _cancelNotifications(scheduleId);
-
       await _repository.deleteSchedule(scheduleId);
       _schedules = await _repository.getSchedulesByMedicine(medicineId);
       _setState(ScheduleViewState.success);
@@ -199,13 +203,7 @@ class ScheduleViewModel extends ChangeNotifier {
   Future<void> toggleSchedule(int scheduleId, bool isActive) async {
     try {
       await _repository.toggleSchedule(scheduleId, isActive);
-
-      // Tắt → huỷ thông báo; Bật → cần lên lịch lại thủ công
-      // (hoặc gọi updateSchedule nếu muốn tự động)
-      if (!isActive) {
-        await _cancelNotifications(scheduleId);
-      }
-
+      if (!isActive) await _cancelNotifications(scheduleId);
       _schedules = _schedules.map((s) {
         return s.id == scheduleId ? s.copyWith(isActive: isActive) : s;
       }).toList();
@@ -215,90 +213,66 @@ class ScheduleViewModel extends ChangeNotifier {
     }
   }
 
-  // ── Notification helpers ─────────────────────────────────────────────────────
+  // ── Notification helpers ──────────────────────────────────────────────────
 
-  /// Lên lịch thông báo cho từng ngày trong [activeDays] trong vòng 14 ngày tới.
-  ///
-  /// Mỗi (scheduleId × ngày) dùng một notificationId riêng biệt:
-  ///   notificationId = scheduleId * 1000 + dayOffset
-  /// Tối đa 14 thông báo / schedule — đủ 2 tuần, sau đó cần re-schedule.
-  Future<void> _scheduleNotifications({
+  /// Lên thông báo cho đúng 1 ngày cụ thể (dateStr = 'yyyy-MM-dd')
+  Future<void> _scheduleNotificationForDate({
     required int    scheduleId,
     required String medicineName,
     required String time,
     required double doseQuantity,
     required String dosageUnit,
     String?         label,
-    required List<String> activeDays,
+    required String dateStr,
   }) async {
-    if (medicineName.isEmpty) return; // Không có tên thuốc → bỏ qua
+    if (medicineName.isEmpty) return;
 
-    final parts   = time.split(':');
-    final hour    = int.tryParse(parts[0]) ?? 0;
-    final minute  = int.tryParse(parts[1]) ?? 0;
-    final now     = DateTime.now();
-    final doseStr = '${doseQuantity.toInt()} $dosageUnit';
+    final parts  = time.split(':');
+    final hour   = int.tryParse(parts[0]) ?? 0;
+    final minute = int.tryParse(parts[1]) ?? 0;
 
-    // Map activeDays code → weekday index (DateTime.weekday: 1=Mon … 7=Sun)
-    const dayCodeToWeekday = {
-      '2': 1, '3': 2, '4': 3, '5': 4,
-      '6': 5, '7': 6, 'CN': 7,
-    };
+    final dateParts = dateStr.split('-');
+    final year  = int.tryParse(dateParts[0]) ?? 0;
+    final month = int.tryParse(dateParts[1]) ?? 0;
+    final day   = int.tryParse(dateParts[2]) ?? 0;
 
-    // Duyệt 14 ngày tới
-    for (int offset = 0; offset < 14; offset++) {
-      final candidate = DateTime(
-          now.year, now.month, now.day + offset, hour, minute);
+    final scheduledDate = DateTime(year, month, day, hour, minute);
 
-      // Bỏ qua nếu đã qua giờ hôm nay
-      if (candidate.isBefore(now)) continue;
+    // Bỏ qua nếu đã qua
+    if (scheduledDate.isBefore(DateTime.now())) return;
 
-      // Kiểm tra ngày này có trong activeDays không
-      // activeDays rỗng = mọi ngày
-      if (activeDays.isNotEmpty) {
-        final weekdayCode = dayCodeToWeekday[candidate.weekday.toString()] ??
-            (candidate.weekday == 7 ? 7 : candidate.weekday);
-        // Tìm code tương ứng với weekday
-        final matchCode = dayCodeToWeekday.entries
-            .firstWhere(
-              (e) => e.value == candidate.weekday,
-          orElse: () => const MapEntry('', 0),
-        )
-            .key;
-        if (!activeDays.contains(matchCode)) continue;
-      }
-
-      final notifId = scheduleId * 1000 + offset;
-
-      await NotificationService.instance.scheduleMedicationAt(
-        id:            notifId,
-        medicineName:  medicineName,
-        time:          time,
-        dose:          doseStr,
-        label:         label,
-        scheduledDate: candidate,
-      );
-    }
+    await NotificationService.instance.scheduleMedicationAt(
+      id:            scheduleId * 1000,
+      medicineName:  medicineName,
+      time:          time,
+      dose:          '${doseQuantity.toInt()} $dosageUnit',
+      label:         label,
+      scheduledDate: scheduledDate,
+    );
   }
 
-  /// Huỷ tất cả thông báo của một schedule (14 slot).
   Future<void> _cancelNotifications(int scheduleId) async {
     for (int offset = 0; offset < 14; offset++) {
       await NotificationService.instance.cancel(scheduleId * 1000 + offset);
     }
   }
 
-  // ── Duplicate check ─────────────────────────────────────────────────────────
+  // ── Duplicate check ───────────────────────────────────────────────────────
 
+  /// FIX B: checkDuplicate giờ nhận [specificDates] để chỉ kiểm tra
+  /// các lịch có ngày trùng với những ngày người dùng vừa chọn.
+  /// Không còn check theo thứ trong tuần nữa.
   Future<DuplicateResult> checkDuplicate({
     required int medicineId,
     required String time,
     required double doseQuantity,
+    required List<String> specificDates, // ['yyyy-MM-dd', ...]
     int? excludeScheduleId,
   }) async {
     try {
-      final existing = await _repository.getActiveSchedulesByMedicine(
-        medicineId: medicineId,
+      final existing = await _repository.getSchedulesByMedicineAndDates(
+        medicineId:        medicineId,
+        dates:             specificDates,
         excludeScheduleId: excludeScheduleId,
       );
 
@@ -306,6 +280,7 @@ class ScheduleViewModel extends ChangeNotifier {
         return const DuplicateResult(DuplicateLevel.none);
       }
 
+      // Có lịch trùng ngày → check thêm trùng giờ không
       final hasSameTime = existing.any((s) => s.time == time);
       if (hasSameTime) {
         return DuplicateResult(
@@ -327,69 +302,76 @@ class ScheduleViewModel extends ChangeNotifier {
     }
   }
 
-  // ── Stock check ─────────────────────────────────────────────────────────────
+  // ── Stock check ───────────────────────────────────────────────────────────
 
+  /// FIX: Thêm [totalDays] để tính đúng tổng lượng thuốc cần dùng
+  /// cho toàn bộ số ngày người dùng vừa chọn.
   Future<StockResult> checkStock({
-    required int medicineId,
+    required int    medicineId,
     required double dosePerTake,
-    int takesPerDay = 1,
+    int             takesPerDay = 1,
+    int             totalDays   = 1, // FIX: số ngày được chọn
   }) async {
     try {
       final info = await _repository.getStockInfo(medicineId);
       if (info == null) {
         return const StockResult(
-          level: StockLevel.sufficient,
-          stockCurrent: 0,
+          level:          StockLevel.sufficient,
+          stockCurrent:   0,
           stockThreshold: 0,
-          daysCanCover: 0,
+          daysCanCover:   0,
         );
       }
 
       final totalPerDay  = dosePerTake * takesPerDay;
+      // FIX: daysCanCover tính dựa trên tổng nhu cầu thực tế
+      final totalNeeded  = totalPerDay * totalDays;
       final daysCanCover = totalPerDay > 0
           ? (info.stockCurrent / totalPerDay).floor()
           : 999;
 
       if (info.isEmpty) {
         return StockResult(
-          level: StockLevel.empty,
-          stockCurrent: 0,
+          level:          StockLevel.empty,
+          stockCurrent:   0,
           stockThreshold: info.stockThreshold,
-          daysCanCover: 0,
+          daysCanCover:   0,
         );
       }
 
-      if (info.isLowStock) {
+      // FIX: cảnh báo low nếu kho không đủ cho số ngày đã chọn
+      // HOẶC kho đang dưới ngưỡng threshold
+      final isLowForPlan = info.stockCurrent < totalNeeded;
+      if (isLowForPlan || info.isLowStock) {
         return StockResult(
-          level: StockLevel.low,
-          stockCurrent: info.stockCurrent,
+          level:          StockLevel.low,
+          stockCurrent:   info.stockCurrent,
           stockThreshold: info.stockThreshold,
-          daysCanCover: daysCanCover,
+          daysCanCover:   daysCanCover,
         );
       }
 
       return StockResult(
-        level: StockLevel.sufficient,
-        stockCurrent: info.stockCurrent,
+        level:          StockLevel.sufficient,
+        stockCurrent:   info.stockCurrent,
         stockThreshold: info.stockThreshold,
-        daysCanCover: daysCanCover,
+        daysCanCover:   daysCanCover,
       );
     } catch (_) {
       return const StockResult(
-        level: StockLevel.sufficient,
-        stockCurrent: 0,
+        level:          StockLevel.sufficient,
+        stockCurrent:   0,
         stockThreshold: 0,
-        daysCanCover: 0,
+        daysCanCover:   0,
       );
     }
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
-  bool _validate({
+  bool _validateBasic({
     required String time,
     required double doseQuantity,
-    required List<String> activeDays,
   }) {
     if (time.isEmpty) {
       _setError('Vui lòng chọn giờ uống');
@@ -397,10 +379,6 @@ class ScheduleViewModel extends ChangeNotifier {
     }
     if (doseQuantity <= 0) {
       _setError('Liều lượng phải lớn hơn 0');
-      return false;
-    }
-    if (activeDays.isEmpty) {
-      _setError('Vui lòng chọn ít nhất một ngày');
       return false;
     }
     return true;

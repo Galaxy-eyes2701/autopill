@@ -28,7 +28,15 @@ abstract class IScheduleRepository {
 
   /// Lấy thông tin tồn kho của một thuốc
   Future<StockInfo?> getStockInfo(int medicineId);
+
+  Future<List<Schedule>> getSchedulesByMedicineAndDates({
+    required int medicineId,
+    required List<String> dates,
+    int? excludeScheduleId,
+  });
 }
+
+
 
 /// Thông tin tồn kho trả về từ repository
 class StockInfo {

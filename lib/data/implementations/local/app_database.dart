@@ -20,7 +20,8 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 2,
+      // FIX: tăng version lên 3 để trigger _upgradeDB
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -73,6 +74,8 @@ class AppDatabase {
       label TEXT,
       dose_quantity REAL NOT NULL,
       active_days TEXT,
+      -- FIX B: ngày cụ thể dạng 'yyyy-MM-dd', NULL = lịch lặp theo active_days (cũ)
+      schedule_date TEXT,
       is_active INTEGER DEFAULT 1,
       FOREIGN KEY (medicine_id) REFERENCES medicines(id) ON DELETE CASCADE
     )
@@ -103,18 +106,22 @@ class AppDatabase {
     )
   ''');
 
-    // 🔥 SEED DATA ngay sau khi tạo bảng
     await seedData(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    // Migration v1 → v2: thêm created_at, updated_at vào medicines
     if (oldVersion < 2) {
-      await db.execute('''
-        ALTER TABLE medicines ADD COLUMN created_at TEXT 
-      ''');
-      await db.execute('''
-        ALTER TABLE medicines ADD COLUMN updated_at TEXT 
-      ''');
+      await db.execute(
+          'ALTER TABLE medicines ADD COLUMN created_at TEXT');
+      await db.execute(
+          'ALTER TABLE medicines ADD COLUMN updated_at TEXT');
+    }
+
+    // FIX: Migration v2 → v3: thêm schedule_date vào schedules
+    if (oldVersion < 3) {
+      await db.execute(
+          'ALTER TABLE schedules ADD COLUMN schedule_date TEXT');
     }
   }
 
@@ -148,13 +155,11 @@ class AppDatabase {
   // ================= SEED DATA =================
   Future<void> seedData(Database db) async {
 
-    // Kiểm tra nếu đã có user rồi thì không seed nữa
     final existing = await db.query('users');
     if (existing.isNotEmpty) return;
 
     final hashedPassword = SecurityUtil.hashPassword("123456");
 
-    // ===== Insert User =====
     final userId = await db.insert('users', {
       'full_name': 'Anh Đại',
       'email': 'test@gmail.com',
@@ -162,9 +167,6 @@ class AppDatabase {
       'dob': '2000-05-20'
     });
 
-    // ===== 10 Medicines — thống nhất 6 form_type với AddMedicineStockScreen =====
-    // form_type : vien_nang | vien_sui | long | tuyt | goi  | tiem
-    // dosage_unit: viên     | viên     | ml   | tuýp | gói  | ống
     final List<Map<String, dynamic>> medicines = [
 
       // ── 1. Viên nang ──────────────────────────────────────────────────────
@@ -310,35 +312,40 @@ class AppDatabase {
       },
     ];
 
+    final today = DateTime.now();
+    final todayStr =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
     for (var med in medicines) {
       med['user_id'] = userId;
       final medicineId = await db.insert('medicines', med);
 
-      // ===== 1 Schedule mỗi thuốc =====
+      // FIX: seed schedule dùng schedule_date thay vì active_days
       final scheduleId = await db.insert('schedules', {
-        'medicine_id': medicineId,
-        'time': '08:00',
-        'label': 'Cữ sáng',
+        'medicine_id':  medicineId,
+        'time':         '08:00',
+        'label':        'Cữ sáng',
         'dose_quantity': 1,
-        'active_days': '2,3,4,5,6,7,CN',
-        'is_active': 1
+        'active_days':  '',
+        'schedule_date': todayStr,
+        'is_active':    1,
       });
 
-      // ===== Intake History mẫu =====
       final now = DateTime.now();
       await db.insert('intake_history', {
-        'schedule_id': scheduleId,
-        'medicine_id': medicineId,
+        'schedule_id':  scheduleId,
+        'medicine_id':  medicineId,
         'scheduled_at': now.millisecondsSinceEpoch,
-        'taken_at': now.millisecondsSinceEpoch,
-        'status': 'taken'
+        'taken_at':     now.millisecondsSinceEpoch,
+        'status':       'taken',
       });
 
-      // ===== Notification mẫu =====
       await db.insert('notifications', {
-        'schedule_id': scheduleId,
-        'notification_id_flutter': scheduleId + 1000,
-        'fire_time': now.add(const Duration(hours: 1)).millisecondsSinceEpoch
+        'schedule_id':              scheduleId,
+        'notification_id_flutter':  scheduleId + 1000,
+        'fire_time': now
+            .add(const Duration(hours: 1))
+            .millisecondsSinceEpoch,
       });
     }
   }

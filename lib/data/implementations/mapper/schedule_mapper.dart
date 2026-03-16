@@ -11,6 +11,7 @@ class ScheduleMapper {
       doseQuantity: dto.doseQuantity,
       activeDays: dto.activeDays?.split(',') ?? [],
       isActive: dto.isActive == 1,
+      scheduleDate: dto.scheduleDate,
     );
   }
 
@@ -23,6 +24,7 @@ class ScheduleMapper {
       doseQuantity: entity.doseQuantity,
       activeDays: entity.activeDays.join(','),
       isActive: entity.isActive ? 1 : 0,
+      scheduleDate: entity.scheduleDate,
     );
   }
 }

@@ -5,6 +5,7 @@ class Schedule {
   final String? label;
   final double doseQuantity;
   final List<String> activeDays; // ["2","3","4","5","6","7","CN"]
+  final String? scheduleDate;
   final bool isActive;
 
   const Schedule({
@@ -14,6 +15,7 @@ class Schedule {
     this.label,
     required this.doseQuantity,
     required this.activeDays,
+    this.scheduleDate,
     this.isActive = true,
   });
 
@@ -24,6 +26,7 @@ class Schedule {
     String? label,
     double? doseQuantity,
     List<String>? activeDays,
+    String? scheduleDate,
     bool? isActive,
   }) {
     return Schedule(
@@ -33,6 +36,7 @@ class Schedule {
       label: label ?? this.label,
       doseQuantity: doseQuantity ?? this.doseQuantity,
       activeDays: activeDays ?? this.activeDays,
+      scheduleDate: scheduleDate ?? this.scheduleDate,
       isActive: isActive ?? this.isActive,
     );
   }

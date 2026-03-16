@@ -99,6 +99,43 @@ class ScheduleRepository implements IScheduleRepository {
         .toList();
   }
 
+  /// FIX B: Query lịch theo danh sách ngày cụ thể (schedule_date).
+  /// Dùng để checkDuplicate — chỉ tìm lịch nào có ngày trùng với
+  /// các ngày người dùng vừa chọn, không phụ thuộc vào active_days/thứ.
+  @override
+  Future<List<Schedule>> getSchedulesByMedicineAndDates({
+    required int medicineId,
+    required List<String> dates, // ['yyyy-MM-dd', ...]
+    int? excludeScheduleId,
+  }) async {
+    if (dates.isEmpty) return [];
+
+    final db = await _db.database;
+
+    // Tạo placeholders: (?, ?, ?)
+    final placeholders = dates.map((_) => '?').join(', ');
+
+    final excludeClause = excludeScheduleId != null
+        ? 'AND id != ?'
+        : '';
+
+    final maps = await db.rawQuery('''
+      SELECT * FROM schedules
+      WHERE medicine_id = ?
+        AND is_active = 1
+        AND schedule_date IN ($placeholders)
+        $excludeClause
+    ''', [
+      medicineId,
+      ...dates,
+      if (excludeScheduleId != null) excludeScheduleId,
+    ]);
+
+    return maps
+        .map((m) => ScheduleMapper.toEntity(ScheduleDto.fromMap(m)))
+        .toList();
+  }
+
   @override
   Future<StockInfo?> getStockInfo(int medicineId) async {
     final db = await _db.database;
@@ -111,9 +148,9 @@ class ScheduleRepository implements IScheduleRepository {
     if (rows.isEmpty) return null;
     final r = rows.first;
     return StockInfo(
-      medicineId: r['id'] as int,
-      medicineName: r['name'] as String,
-      stockCurrent: r['stock_current'] as int? ?? 0,
+      medicineId:     r['id'] as int,
+      medicineName:   r['name'] as String,
+      stockCurrent:   r['stock_current'] as int? ?? 0,
       stockThreshold: r['stock_threshold'] as int? ?? 0,
     );
   }

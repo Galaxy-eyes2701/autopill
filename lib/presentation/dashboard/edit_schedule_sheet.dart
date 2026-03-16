@@ -92,7 +92,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
     if (picked != null) setState(() => _selectedTime = picked);
   }
 
-  // ── Save: update DB + reschedule notifications ──────────────────────────────
+  // ── Save ───────────────────────────────────────────────────────────────────
   Future<void> _save() async {
     setState(() => _isSaving = true);
     final db = await AppDatabase.instance.database;
@@ -109,10 +109,10 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       whereArgs: [widget.schedule.id],
     );
 
-    // 2. Lấy thông tin thuốc (tên + đơn vị) để đặt lại thông báo
+    // 2. Lấy thông tin thuốc
     final medRows = await db.query(
       'medicines',
-      columns:   ['name', 'dosage_unit', 'form_type'],
+      columns:   ['name', 'dosage_unit'],
       where:     'id = ?',
       whereArgs: [widget.schedule.medicineId],
     );
@@ -120,20 +120,20 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
     if (medRows.isNotEmpty) {
       final medicineName = medRows.first['name'] as String;
       final dosageUnit   = medRows.first['dosage_unit'] as String? ?? 'viên';
-      final activeDays   = widget.schedule.activeDays;
 
-      // 3. Huỷ toàn bộ thông báo cũ (14 slot)
+      // 3. Huỷ thông báo cũ
       await _cancelOldNotifications(widget.schedule.id!);
 
-      // 4. Lên lịch lại với giờ + liều mới
-      await _rescheduleNotifications(
+      // 4. FIX: Lên lịch lại theo scheduleDate cụ thể thay vì activeDays
+      await _rescheduleNotification(
         scheduleId:   widget.schedule.id!,
         medicineName: medicineName,
         time:         _timeString,
         doseQty:      _doseQty,
         dosageUnit:   dosageUnit,
         label:        _labelCtrl.text.trim(),
-        activeDays:   activeDays,
+        scheduleDate: widget.schedule.scheduleDate, // FIX: dùng ngày cụ thể
+        activeDays:   widget.schedule.activeDays,   // fallback cho lịch cũ
       );
     }
 
@@ -155,29 +155,62 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
     }
   }
 
-  // ── Huỷ 14 slot thông báo cũ ───────────────────────────────────────────────
+  // ── Huỷ thông báo cũ ──────────────────────────────────────────────────────
   Future<void> _cancelOldNotifications(int scheduleId) async {
+    // Huỷ cả 2 dạng ID để đảm bảo không sót:
+    // - Dạng cũ: scheduleId * 1000 + offset (0..13)
+    // - Dạng mới: scheduleId * 1000 + 0 (chỉ 1 slot)
     for (int offset = 0; offset < 14; offset++) {
       await NotificationService.instance.cancel(scheduleId * 1000 + offset);
     }
   }
 
-  // ── Lên lịch thông báo mới cho 14 ngày tới ─────────────────────────────────
-  Future<void> _rescheduleNotifications({
+  /// FIX: Lên lịch thông báo theo đúng logic hiện tại của app.
+  ///
+  /// - Nếu schedule có [scheduleDate] (hướng B mới) → lên đúng 1 thông báo
+  ///   cho ngày + giờ cụ thể đó.
+  /// - Nếu không có scheduleDate (lịch cũ dùng activeDays) → fallback về
+  ///   logic 14 ngày theo thứ trong tuần như trước.
+  Future<void> _rescheduleNotification({
     required int    scheduleId,
     required String medicineName,
     required String time,
     required int    doseQty,
     required String dosageUnit,
     required String label,
-    required List<String> activeDays,
+    String?         scheduleDate,
+    List<String>    activeDays = const [],
   }) async {
-    final parts  = time.split(':');
-    final hour   = int.tryParse(parts[0]) ?? 0;
-    final minute = int.tryParse(parts[1]) ?? 0;
-    final now    = DateTime.now();
+    final parts   = time.split(':');
+    final hour    = int.tryParse(parts[0]) ?? 0;
+    final minute  = int.tryParse(parts[1]) ?? 0;
     final doseStr = '$doseQty $dosageUnit';
+    final now     = DateTime.now();
 
+    // ── Hướng B: có scheduleDate cụ thể ──────────────────────────────────
+    if (scheduleDate != null && scheduleDate.isNotEmpty) {
+      final dateParts = scheduleDate.split('-');
+      final year  = int.tryParse(dateParts[0]) ?? 0;
+      final month = int.tryParse(dateParts[1]) ?? 0;
+      final day   = int.tryParse(dateParts[2]) ?? 0;
+
+      final scheduledDateTime = DateTime(year, month, day, hour, minute);
+
+      // Bỏ qua nếu đã qua giờ
+      if (scheduledDateTime.isBefore(now)) return;
+
+      await NotificationService.instance.scheduleMedicationAt(
+        id:            scheduleId * 1000, // slot 0
+        medicineName:  medicineName,
+        time:          time,
+        dose:          doseStr,
+        label:         label.isNotEmpty ? label : null,
+        scheduledDate: scheduledDateTime,
+      );
+      return;
+    }
+
+    // ── Fallback: lịch cũ dùng activeDays (thứ trong tuần) ───────────────
     const dayCodeToWeekday = {
       '2': 1, '3': 2, '4': 3, '5': 4,
       '6': 5, '7': 6, 'CN': 7,
@@ -187,10 +220,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
       final candidate = DateTime(
           now.year, now.month, now.day + offset, hour, minute);
 
-      // Bỏ qua nếu đã qua
       if (candidate.isBefore(now)) continue;
 
-      // Kiểm tra ngày có trong activeDays không
       if (activeDays.isNotEmpty) {
         final matchCode = dayCodeToWeekday.entries
             .firstWhere(
@@ -212,7 +243,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
     }
   }
 
-  // ── Xoá lịch ───────────────────────────────────────────────────────────────
+  // ── Xoá lịch ──────────────────────────────────────────────────────────────
   void _showCannotDeleteSnack() {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
@@ -238,8 +269,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
         content: Text(
           'Lịch uống "${widget.medicineName}" lúc '
               '${widget.schedule.time} sẽ bị xoá vĩnh viễn.',
-          style:
-          GoogleFonts.lexend(fontSize: 14, color: Colors.grey.shade600),
+          style: GoogleFonts.lexend(
+              fontSize: 14, color: Colors.grey.shade600),
         ),
         actions: [
           TextButton(
@@ -263,10 +294,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
 
     if (confirmed == true && mounted) {
       final db = await AppDatabase.instance.database;
-
-      // Huỷ thông báo trước khi xoá
       await _cancelOldNotifications(widget.schedule.id!);
-
       await db.delete('schedules',
           where: 'id = ?', whereArgs: [widget.schedule.id]);
 
@@ -282,15 +310,15 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
           ]),
           backgroundColor: Colors.red.shade600,
           behavior: SnackBarBehavior.floating,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
           duration: const Duration(seconds: 2),
         ));
       }
     }
   }
 
-  // ── BUILD ───────────────────────────────────────────────────────────────────
+  // ── BUILD ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
@@ -334,7 +362,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                 ),
               ),
               IconButton(
-                onPressed: _isTaken ? _showCannotDeleteSnack : _confirmDelete,
+                onPressed:
+                _isTaken ? _showCannotDeleteSnack : _confirmDelete,
                 icon: Icon(
                   Icons.delete_outline_rounded,
                   color: _isTaken ? Colors.grey.shade300 : Colors.red,
@@ -399,9 +428,8 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
                 child: Row(
                   children: [
                     Icon(Icons.schedule_rounded,
-                        color: _isTaken
-                            ? Colors.grey.shade400
-                            : _blue,
+                        color:
+                        _isTaken ? Colors.grey.shade400 : _blue,
                         size: 22),
                     const SizedBox(width: 12),
                     Text(
@@ -574,7 +602,7 @@ class _EditScheduleSheetState extends State<_EditScheduleSheet> {
   }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 class _SectionLabel extends StatelessWidget {
   final IconData icon;
   final String label;

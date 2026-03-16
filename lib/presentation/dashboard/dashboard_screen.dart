@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:percent_indicator/percent_indicator.dart';
@@ -66,6 +68,9 @@ class _DashboardBodyState extends State<_DashboardBody>
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
 
+  // FIX 2: Timer tự động rebuild mỗi phút để cập nhật trạng thái theo thời gian
+  late Timer _ticker;
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   @override
   void initState() {
@@ -74,6 +79,11 @@ class _DashboardBodyState extends State<_DashboardBody>
         vsync: this, duration: const Duration(milliseconds: 500));
     _fadeAnim =
         CurvedAnimation(parent: _animController, curve: Curves.easeOut);
+
+    // FIX 2: Khởi động timer, setState mỗi phút để _diffMinutes luôn được tính lại
+    _ticker = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final route = ModalRoute.of(context);
@@ -86,6 +96,8 @@ class _DashboardBodyState extends State<_DashboardBody>
   void dispose() {
     dashboardRouteObserver.unsubscribe(this);
     _animController.dispose();
+    // FIX 2: Huỷ timer khi widget bị dispose
+    _ticker.cancel();
     super.dispose();
   }
 
@@ -155,16 +167,16 @@ class _DashboardBodyState extends State<_DashboardBody>
   }
 
   bool _scheduleActiveOnDay(Schedule s, DateTime date) {
+    // Nếu schedule có ngày cụ thể → chỉ hiện đúng ngày đó
+    if (s.scheduleDate != null && s.scheduleDate!.isNotEmpty) {
+      final y = date.year.toString().padLeft(4, '0');
+      final m = date.month.toString().padLeft(2, '0');
+      final d = date.day.toString().padLeft(2, '0');
+      return s.scheduleDate == '$y-$m-$d';
+    }
+    // Fallback: schedule cũ dùng active_days (thứ trong tuần)
     if (s.activeDays.isEmpty) return true;
-    final dayMap = {
-      1: '2',
-      2: '3',
-      3: '4',
-      4: '5',
-      5: '6',
-      6: '7',
-      7: 'CN'
-    };
+    final dayMap = {1:'2', 2:'3', 3:'4', 4:'5', 5:'6', 6:'7', 7:'CN'};
     final dayCode = dayMap[date.weekday] ?? '';
     return s.activeDays.contains(dayCode);
   }
@@ -305,7 +317,6 @@ class _DashboardBodyState extends State<_DashboardBody>
                             _buildDateBanner(),
                           _buildTimelineSection(vm.schedules),
                           const SizedBox(height: 20),
-                          // ── Streak Card (chỉ hiện khi đang xem hôm nay) ──
                           if (_isToday) _StreakCard(userId: _userId),
                         ],
                       ),
@@ -762,7 +773,6 @@ class _StreakCardState extends State<_StreakCard> {
     final db = await AppDatabase.instance.database;
     int streak = 0;
 
-    // Lùi từng ngày từ hôm qua, kiểm tra có ít nhất 1 lần 'taken' không
     DateTime day = DateTime.now().subtract(const Duration(days: 1));
     for (int i = 0; i < 365; i++) {
       final start =
@@ -780,12 +790,11 @@ class _StreakCardState extends State<_StreakCard> {
         LIMIT 1
       ''', [widget.userId, start, end]);
 
-      if (rows.isEmpty) break; // Chuỗi bị đứt
+      if (rows.isEmpty) break;
       streak++;
       day = day.subtract(const Duration(days: 1));
     }
 
-    // Cộng thêm hôm nay nếu đã uống ít nhất 1 lần
     final now = DateTime.now();
     final todayStart =
         DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
@@ -802,10 +811,12 @@ class _StreakCardState extends State<_StreakCard> {
 
     if (todayRows.isNotEmpty) streak++;
 
-    if (mounted) setState(() {
-      _streak = streak;
-      _loading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _streak = streak;
+        _loading = false;
+      });
+    }
   }
 
   String get _message {
@@ -835,7 +846,6 @@ class _StreakCardState extends State<_StreakCard> {
       ),
       child: Row(
         children: [
-          // ── Icon ngọn lửa ──
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -845,7 +855,6 @@ class _StreakCardState extends State<_StreakCard> {
             child: const Text('🔥', style: TextStyle(fontSize: 24)),
           ),
           const SizedBox(width: 16),
-          // ── Text ──
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -869,7 +878,6 @@ class _StreakCardState extends State<_StreakCard> {
               ],
             ),
           ),
-          // ── Badge số ngày ──
           Container(
             padding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -966,14 +974,19 @@ class _TimelineItemState extends State<_TimelineItem>
   }
 
   bool get _isTaken => widget.status == 'taken';
+
   bool get _isCurrent =>
-      widget.isToday && !_isTaken && _diffMinutes >= -30 && _diffMinutes <= 60;
+      widget.isToday && !_isTaken && _diffMinutes >= -30 && _diffMinutes <= 30;
+
   bool get _isOverdue =>
-      widget.isToday && !_isTaken && _diffMinutes > 60;
+      widget.isToday && !_isTaken && _diffMinutes > 30 && _diffMinutes <= 60;
+
   bool get _isMissed =>
-      !widget.isToday && !widget.isFuture && widget.status == 'pending';
+      (!widget.isToday && !widget.isFuture && widget.status == 'pending') ||
+          (widget.isToday && !_isTaken && _diffMinutes > 60);
+
   bool get _isUpcoming =>
-      widget.isFuture || widget.status == 'upcoming';
+      (widget.isFuture || widget.status == 'upcoming') && !_isMissed;
 
   Color get _dotColor {
     if (_isTaken) return Colors.green;
@@ -1061,7 +1074,6 @@ class _TimelineItemState extends State<_TimelineItem>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header
                       Row(
                         children: [
                           Expanded(

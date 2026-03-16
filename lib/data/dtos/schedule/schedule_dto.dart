@@ -7,6 +7,7 @@ class ScheduleDto {
   final double doseQuantity;
   final String? activeDays; // stored as "2,3,4,5,6,7,CN"
   final int isActive; // SQLite: 1 / 0
+  final String? scheduleDate;
 
   const ScheduleDto({
     this.id,
@@ -16,6 +17,7 @@ class ScheduleDto {
     required this.doseQuantity,
     this.activeDays,
     this.isActive = 1,
+    this.scheduleDate,
   });
 
   factory ScheduleDto.fromMap(Map<String, dynamic> map) {
@@ -26,6 +28,7 @@ class ScheduleDto {
       label: map['label'] as String?,
       doseQuantity: (map['dose_quantity'] as num).toDouble(),
       activeDays: map['active_days'] as String?,
+      scheduleDate: map['schedule_date'] as String?,
       isActive: map['is_active'] as int? ?? 1,
     );
   }
@@ -38,6 +41,7 @@ class ScheduleDto {
       'label': label,
       'dose_quantity': doseQuantity,
       'active_days': activeDays,
+      if (scheduleDate != null) 'schedule_date': scheduleDate,
       'is_active': isActive,
     };
   }
