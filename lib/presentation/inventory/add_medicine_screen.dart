@@ -26,9 +26,10 @@ class _DrugSuggestion {
   final String genericName;
   final String manufacturer;
   final String route;
-  final String dosageForm;
+  final String dosageForm; // từ r['dosage_form']
   final String strength;
   final String indication;
+  final List<String> pharmClasses; // openfda.pharm_class_epc
 
   const _DrugSuggestion({
     required this.brandName,
@@ -38,38 +39,111 @@ class _DrugSuggestion {
     required this.dosageForm,
     required this.strength,
     required this.indication,
+    this.pharmClasses = const [],
   });
 
   // Map dosage form từ FDA → formType nội bộ
+  // Ưu tiên check từ trên xuống: dạng đặc biệt trước, viên nang cuối
   String get formType {
     final f = dosageForm.toLowerCase();
-    if (f.contains('capsule') || f.contains('tablet') || f.contains('caplet')) {
-      return 'vien_nang';
+
+    // Dạng tiêm
+    if (f.contains('inject') ||
+        f.contains('intravenous') ||
+        f.contains('vial') ||
+        f.contains('ampul') ||
+        f.contains('infusion') ||
+        f.contains('parenteral')) {
+      return 'tiem';
     }
-    if (f.contains('effervescent')) return 'vien_sui';
+
+    // Viên sủi (check trước viên nang vì cũng chứa "tablet")
+    if (f.contains('effervescent') ||
+        f.contains('dispersible') ||
+        f.contains('soluble tablet')) {
+      return 'vien_sui';
+    }
+
+    // Gói bột / bột pha uống
+    if (f.contains('powder') ||
+        f.contains('granule') ||
+        f.contains('packet') ||
+        f.contains('sachet') ||
+        f.contains('for oral solution') ||
+        f.contains('for reconstitution')) {
+      return 'goi';
+    }
+
+    // Dạng lỏng
     if (f.contains('solution') ||
         f.contains('syrup') ||
         f.contains('suspension') ||
         f.contains('liquid') ||
-        f.contains('elixir')) {
+        f.contains('elixir') ||
+        f.contains('drops') ||
+        f.contains('oral liquid') ||
+        f.contains('linctus') ||
+        f.contains('mixture') ||
+        f.contains('emulsion')) {
       return 'long';
     }
+
+    // Tuýp / Kem / Bôi ngoài
     if (f.contains('cream') ||
         f.contains('gel') ||
         f.contains('ointment') ||
         f.contains('lotion') ||
-        f.contains('patch')) {
+        f.contains('patch') ||
+        f.contains('transdermal') ||
+        f.contains('topical') ||
+        f.contains('foam') ||
+        f.contains('paste') ||
+        f.contains('spray') ||
+        f.contains('eye drop') ||
+        f.contains('ear drop') ||
+        f.contains('nasal') ||
+        f.contains('inhaler') ||
+        f.contains('aerosol') ||
+        f.contains('suppository')) {
       return 'tuyt';
     }
-    if (f.contains('powder') || f.contains('granule') || f.contains('packet')) {
-      return 'goi';
+
+    // Viên nang / viên nén (mặc định)
+    if (f.contains('capsule') ||
+        f.contains('tablet') ||
+        f.contains('caplet') ||
+        f.contains('pill') ||
+        f.contains('lozenge') ||
+        f.contains('chewable') ||
+        f.contains('sublingual') ||
+        f.contains('film')) {
+      return 'vien_nang';
     }
-    if (f.contains('inject') ||
-        f.contains('vial') ||
-        f.contains('ampule') ||
-        f.contains('infusion')) {
+
+    // Fallback: đoán từ route
+    final r = route.toLowerCase();
+    if (r.contains('topical') || r.contains('cutaneous')) return 'tuyt';
+    if (r.contains('inject') ||
+        r.contains('intravenous') ||
+        r.contains('subcutaneous'))
       return 'tiem';
-    }
+    if (r.contains('inhal') ||
+        r.contains('nasal') ||
+        r.contains('ophthalmic') ||
+        r.contains('otic'))
+      return 'tuyt';
+
+    // Fallback: đoán từ genericName
+    final g = genericName.toLowerCase();
+    if (g.contains('syrup') ||
+        g.contains('solution') ||
+        g.contains('suspension'))
+      return 'long';
+    if (g.contains('cream') || g.contains('gel') || g.contains('ointment'))
+      return 'tuyt';
+    if (g.contains('injection') || g.contains('injectable')) return 'tiem';
+    if (g.contains('powder') || g.contains('sachet')) return 'goi';
+
     return 'vien_nang';
   }
 
@@ -91,9 +165,10 @@ class _DrugSuggestion {
     }
   }
 
-
+  // Category = công dụng lấy từ indications_and_usage, rút gọn thành tiếng Việt
   String get category {
     if (indication.isNotEmpty) return _parseIndication(indication);
+    // Fallback nếu không có indication
     final g = genericName.toLowerCase();
     if (g.contains('paracetamol') ||
         g.contains('ibuprofen') ||
@@ -116,7 +191,9 @@ class _DrugSuggestion {
   }
 
   static String _parseIndication(String raw) {
+    // Lấy câu đầu tiên của indications_and_usage rồi dịch/rút gọn
     final lower = raw.toLowerCase();
+    // Map từ khoá tiếng Anh → nhãn tiếng Việt ngắn gọn
     final Map<String, String> keyMap = {
       'pain': 'Giảm đau',
       'fever': 'Hạ sốt',
@@ -170,6 +247,7 @@ class _DrugSuggestion {
       if (lower.contains(entry.key)) return entry.value;
     }
 
+    // Nếu không match → lấy 40 ký tự đầu của indication làm fallback
     final trimmed = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
     return trimmed.length > 45 ? '${trimmed.substring(0, 42)}...' : trimmed;
   }
@@ -318,13 +396,18 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
   // ── OpenFDA search ────────────────────────────────────────────────────────
   void _onSearchChanged(String val) {
     _debounce?.cancel();
+    // Nếu đang ở trạng thái đã điền từ API, không trigger search lại
+    if (_filledByApi) return;
     if (val.trim().length < 2) {
-      setState(() => _suggestions = []);
+      setState(() {
+        _suggestions = [];
+        _searching = false;
+      });
       return;
     }
     setState(() => _searching = true);
     _debounce = Timer(
-      const Duration(milliseconds: 500),
+      const Duration(milliseconds: 600),
       () => _fetchDrugs(val.trim()),
     );
   }
@@ -376,6 +459,7 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
         final brand = brands.isNotEmpty ? _titleCase(brands.first) : '';
         final generic = generics.isNotEmpty ? _titleCase(generics.first) : '';
 
+        // Chỉ giữ kết quả có tên BẮT ĐẦU bằng query (loại kết quả không liên quan)
         final brandMatch = brand.toLowerCase().startsWith(q);
         final genericMatch = generic.toLowerCase().startsWith(q);
         if (!brandMatch && !genericMatch) continue;
@@ -385,7 +469,19 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
         seen.add(key);
         if (brand.isEmpty && generic.isEmpty) continue;
 
-        final forms = r['dosage_form'] as String? ?? '';
+        // Lấy dosage_form từ openfda.dosage_form (list) TRƯỚC, fallback về r['dosage_form']
+        // FDA thường để dosage_form trong openfda object dạng list
+        String forms = '';
+        try {
+          final formsList = openfda['dosage_form'] as List?;
+          if (formsList != null && formsList.isNotEmpty) {
+            forms = formsList.first as String? ?? '';
+          }
+        } catch (_) {}
+        if (forms.isEmpty) forms = r['dosage_form'] as String? ?? '';
+        debugPrint(
+          '[AutoPill] brand=$brand | dosageForm="$forms" | route=${routes.isNotEmpty ? routes.first : ""}',
+        );
         String strength = '';
         try {
           final strengths = r['active_ingredient'] as List?;
@@ -406,6 +502,13 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
           }
         } catch (_) {}
 
+        // Lấy pharm_class để hỗ trợ category fallback
+        List<String> pharmClasses = [];
+        try {
+          final epc = openfda['pharm_class_epc'] as List?;
+          if (epc != null) pharmClasses = epc.cast<String>();
+        } catch (_) {}
+
         list.add(
           _DrugSuggestion(
             brandName: brand,
@@ -415,6 +518,7 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
             dosageForm: _titleCase(forms),
             strength: strength,
             indication: indication,
+            pharmClasses: pharmClasses,
           ),
         );
       }
@@ -455,16 +559,24 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
   // ── Điền form từ suggestion ───────────────────────────────────────────────
   void _fillFromSuggestion(_DrugSuggestion s) {
     HapticFeedback.mediumImpact();
+    _debounce?.cancel(); // Huỷ debounce đang chờ
+
     final fi = _formIndexFromValue(s.formType);
+    final resolvedUnit = s.unit.isNotEmpty ? s.unit : _formTypes[fi].unit;
+
+    // Clear search controller TRƯỚC khi setState để không trigger _onSearchChanged
+    _searchCtrl.removeListener(() {});
+    _searchCtrl.text = '';
+
     setState(() {
       _formIndex = fi;
       _filledByApi = true;
       _suggestions = [];
-      _searchCtrl.text = '';
+      _searching = false;
       _nameCtrl.text = s.displayName;
       _categoryCtrl.text = s.category;
       _ingredientCtrl.text = s.genericName;
-      _unitCtrl.text = s.unit;
+      _unitCtrl.text = resolvedUnit;
       _nameError = _categoryError = null;
     });
     FocusScope.of(context).unfocus();
@@ -473,6 +585,7 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
   void _clearApiData() {
     setState(() {
       _filledByApi = false;
+      _suggestions = [];
       _nameCtrl.clear();
       _categoryCtrl.clear();
       _ingredientCtrl.clear();
@@ -891,10 +1004,16 @@ class _AddMedicineStockScreenState extends State<AddMedicineStockScreen>
                           color: _C.primary.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Icon(
-                          _formTypes[_formIndexFromValue(s.formType)].icon,
-                          color: _C.primary,
-                          size: 20,
+                        // formType tự tính từ dosageForm + route + genericName
+                        child: Builder(
+                          builder: (_) {
+                            final idx = _formIndexFromValue(s.formType);
+                            return Icon(
+                              _formTypes[idx].icon,
+                              color: _C.primary,
+                              size: 20,
+                            );
+                          },
                         ),
                       ),
                       const SizedBox(width: 12),
