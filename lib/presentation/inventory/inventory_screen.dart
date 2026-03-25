@@ -8,6 +8,8 @@ import 'package:autopill/data/dtos/medicines/medicine_response_dto.dart';
 import 'package:autopill/presentation/inventory/edit_medicine_screen.dart';
 import 'package:autopill/presentation/inventory/stop_medicine_dialog.dart';
 
+import '../../data/implementations/local/app_database.dart';
+
 // ─── Design tokens ───────────────────────────────────────────────────────────
 const _kPrimary  = Color(0xFF137FEC);
 const _kSurface  = Colors.white;
@@ -89,12 +91,40 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _archive(MedicineResponseDto m) async {
-    final ok = await StopMedicineDialog.show(context, medicineName: m.name);
-    if (ok == true) {
-      final success = await context
-          .read<MedicineViewmodel>()
-          .updateMedicineStatus(m.id, 'archived');
-      if (mounted && success) _snack('"${m.name}" đã lưu trữ', Colors.orange);
+    final db = await AppDatabase.instance.database;
+    final scheduleRows = await db.query(
+      'schedules',
+      where: 'medicine_id = ? AND is_active = 1',
+      whereArgs: [m.id],
+    );
+
+    final result = await StopMedicineDialog.show(
+      context,
+      medicineName: m.name,
+      scheduleCount: scheduleRows.length,
+    );
+    if (result == null || !result.confirmed) return;
+
+    if (result.scheduleAction == ScheduleAction.cancel &&
+        scheduleRows.isNotEmpty) {
+      await db.update(
+        'schedules',
+        {'is_active': 0},
+        where: 'medicine_id = ?',
+        whereArgs: [m.id],
+      );
+    }
+
+    final success = await context
+        .read<MedicineViewmodel>()
+        .updateMedicineStatus(m.id, 'archived');
+
+    if (mounted && success) {
+      final msg =
+      result.scheduleAction == ScheduleAction.cancel && scheduleRows.isNotEmpty
+          ? '"${m.name}" đã dừng và huỷ ${scheduleRows.length} lịch uống'
+          : '"${m.name}" đã lưu trữ';
+      _snack(msg, Colors.orange);
     }
   }
 

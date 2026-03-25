@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -80,7 +82,29 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
         return 'lần';
     }
   }
-
+  static IconData iconFromFormType(String? formType) {
+    switch (formType) {
+      case 'vien_sui':
+        return Icons.bubble_chart_rounded;
+      case 'long':
+      case 'siro':
+      case 'dung_dich':
+      case 'nuoc':
+        return Icons.water_drop_rounded;
+      case 'tuyt':
+      case 'kem':
+        return Icons.science_rounded;
+      case 'goi':
+        return Icons.inventory_2_rounded;
+      case 'tiem':
+      case 'ong':
+        return Icons.vaccines_rounded;
+      case 'vien_nang':
+      case 'vien_nen':
+      default:
+        return Icons.medication_rounded;
+    }
+  }
   // ── FIX: Kiểm tra ngày + giờ còn trong tương lai ─────────────────────────
   bool _isDateTimeValid(DateTime date) {
     final now = DateTime.now();
@@ -636,7 +660,7 @@ class _SetupDoseBodyState extends State<_SetupDoseBody>
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.medication_rounded,
+                  Icon(iconFromFormType(formType),
                       color: Colors.orange, size: 22),
                   const SizedBox(width: 10),
                   Column(
@@ -1260,6 +1284,55 @@ class _MedicineTile extends StatelessWidget {
     return const Color(0xFF137FEC);
   }
 
+  List<int> _presetsForUnit(String unit) {
+    switch (unit) {
+      case 'ml':   return [5, 10, 15, 20, 30];
+      case 'gói':  return [1, 2, 3];
+      case 'ống':  return [1, 2];
+      case 'tuýp': return [1, 2];
+      default:     return [1, 2, 3];  // viên
+    }
+  }
+
+  Widget _buildPresetChips(String unit, BuildContext context) {
+    final presets = _presetsForUnit(unit);
+    return Row(
+      children: [
+        Text('Nhanh:',
+            style: GoogleFonts.lexend(fontSize: 11, color: Colors.grey.shade500)),
+        const SizedBox(width: 8),
+        ...presets.map((v) => GestureDetector(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onDoseChanged(v);
+          },
+          child: Container(
+            margin: const EdgeInsets.only(right: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: doseQty == v
+                  ? const Color(0xFF137FEC).withOpacity(0.12)
+                  : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: doseQty == v
+                    ? const Color(0xFF137FEC).withOpacity(0.4)
+                    : Colors.grey.shade200,
+              ),
+            ),
+            child: Text('$v',
+                style: GoogleFonts.lexend(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: doseQty == v
+                        ? const Color(0xFF137FEC)
+                        : Colors.grey.shade600)),
+          ),
+        )),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final unit = _SetupDoseBodyState.doseUnitFromFormType(medicine.formType);
@@ -1311,7 +1384,7 @@ class _MedicineTile extends StatelessWidget {
                           : const Color(0xFFF0F4FF),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(Icons.medication_rounded,
+                    child: Icon(_SetupDoseBodyState.iconFromFormType(medicine.formType),
                         color: isSelected
                             ? const Color(0xFF137FEC)
                             : Colors.grey.shade400,
@@ -1398,8 +1471,8 @@ class _MedicineTile extends StatelessWidget {
                       _RoundBtn(
                         icon: Icons.remove_rounded,
                         size: 34,
-                        onPressed: doseQty > 1
-                            ? () => onDoseChanged(doseQty - 1)
+                        onPressed: doseQty > (unit == 'ml' ? 5 : 1)
+                            ? () => onDoseChanged(doseQty - (unit == 'ml' ? 5 : 1))
                             : null,
                       ),
                       Padding(
@@ -1427,12 +1500,14 @@ class _MedicineTile extends StatelessWidget {
                       _RoundBtn(
                         icon: Icons.add_rounded,
                         size: 34,
-                        onPressed: () => onDoseChanged(doseQty + 1),
+                        onPressed: () => onDoseChanged(doseQty + (unit == 'ml' ? 5 : 1)),
                       ),
                     ],
                   ),
 
                   // Cảnh báo inline
+                  const SizedBox(height: 10),
+                  _buildPresetChips(unit, context),
                   if (isOverStock) ...[
                     const SizedBox(height: 8),
                     _InlineWarning(
@@ -1608,30 +1683,63 @@ class _PresetTile extends StatelessWidget {
   }
 }
 
-class _RoundBtn extends StatelessWidget {
+class _RoundBtn extends StatefulWidget {
   final IconData icon;
   final VoidCallback? onPressed;
   final double size;
   const _RoundBtn({required this.icon, this.onPressed, this.size = 40});
 
   @override
+  State<_RoundBtn> createState() => _RoundBtnState();
+}
+
+class _RoundBtnState extends State<_RoundBtn> {
+  Timer? _holdTimer;
+  int _holdMs = 0;
+
+  void _startHold() {
+    if (widget.onPressed == null) return;
+    widget.onPressed!();
+    _holdMs = 0;
+    _holdTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
+      if (!mounted) return;
+      _holdMs += 80;
+      widget.onPressed?.call();
+    });
+  }
+
+  void _stopHold() {
+    _holdTimer?.cancel();
+    _holdTimer = null;
+  }
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onPressed,
+      onTap: widget.onPressed,
+      onLongPressStart: (_) => _startHold(),
+      onLongPressEnd: (_) => _stopHold(),
+      onLongPressCancel: _stopHold,
       child: Container(
-        width: size,
-        height: size,
+        width: widget.size,
+        height: widget.size,
         decoration: BoxDecoration(
-          color: onPressed != null
+          color: widget.onPressed != null
               ? const Color(0xFF137FEC).withOpacity(0.1)
               : Colors.grey.shade100,
           shape: BoxShape.circle,
         ),
-        child: Icon(icon,
-            color: onPressed != null
+        child: Icon(widget.icon,
+            color: widget.onPressed != null
                 ? const Color(0xFF137FEC)
                 : Colors.grey.shade300,
-            size: size * 0.55),
+            size: widget.size * 0.55),
       ),
     );
   }
@@ -1645,20 +1753,21 @@ class _QuickBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return OutlinedButton(
-      onPressed: onTap,
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        side: const BorderSide(color: Color(0xFF137FEC)),
-        shape:
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            side: const BorderSide(color: Color(0xFF137FEC)),
+            shape:
         RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-      child: Text(label,
-          style: GoogleFonts.lexend(
-              fontSize: 12,
-              color: const Color(0xFF137FEC),
-              fontWeight: FontWeight.w600)),
+    ),
+    child: Text(label,
+    style: GoogleFonts.lexend(
+    fontSize: 12,
+    color: const Color(0xFF137FEC),
+    fontWeight: FontWeight.w600)),
     );
   }
 }
+

@@ -141,15 +141,19 @@ class _DashboardBodyState extends State<_DashboardBody>
 
       final medRows = await db
           .query('medicines', where: 'id = ?', whereArgs: [s.medicineId]);
-      if (medRows.isNotEmpty) {
-        _medicineNames[s.id!] = medRows.first['name'] as String;
-        _medicineCategories[s.id!] =
-            medRows.first['category'] as String? ?? '';
-        _medicineFormTypes[s.id!] =
-            medRows.first['form_type'] as String? ?? '';
-        _medicineUnits[s.id!] =
-            medRows.first['dosage_unit'] as String? ?? 'viên';
-      }
+
+      // ✅ THÊM: bỏ qua schedule nếu thuốc đã archived
+      if (medRows.isEmpty) continue;
+      final medStatus = medRows.first['status'] as String? ?? 'active';
+      if (medStatus == 'archived' || medStatus == 'inactive') continue;
+
+      _medicineNames[s.id!] = medRows.first['name'] as String;
+      _medicineCategories[s.id!] =
+          medRows.first['category'] as String? ?? '';
+      _medicineFormTypes[s.id!] =
+          medRows.first['form_type'] as String? ?? '';
+      _medicineUnits[s.id!] =
+          medRows.first['dosage_unit'] as String? ?? 'viên';
 
       final intakeRows = await db.query(
         'intake_history',
@@ -270,8 +274,11 @@ class _DashboardBodyState extends State<_DashboardBody>
       _intakeStatus.values.where((s) => s == 'taken').length;
 
   List<Schedule> _sortedAndFiltered(List<Schedule> list) {
-    final copy =
-    list.where((s) => _scheduleActiveOnDay(s, _selectedDate)).toList();
+    final copy = list
+        .where((s) =>
+    _scheduleActiveOnDay(s, _selectedDate) &&
+        _medicineNames.containsKey(s.id))
+        .toList();
     copy.sort((a, b) => a.time.compareTo(b.time));
     return copy;
   }
